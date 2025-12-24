@@ -41,54 +41,25 @@ export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps)
       setError(null);
       setScanStatus('Requesting camera access...');
       
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      const videoDevices = devices.filter(device => device.kind === 'videoinput');
+      const constraints = {
+        video: {
+          facingMode: 'environment',
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          aspectRatio: { ideal: 16/9 }
+        }
+      };
+
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
       
-      console.log('[BarcodeScanner] Found cameras:', videoDevices.length);
-      
-      if (videoDevices.length === 0) {
-        throw new Error('No camera found');
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
       }
 
-      const selectedDeviceId = videoDevices[videoDevices.length - 1]?.deviceId;
-      console.log('[BarcodeScanner] Using camera:', selectedDeviceId);
-
-      setScanStatus('Starting camera...');
-
-      if (codeReaderRef.current && videoRef.current) {
-        await codeReaderRef.current.decodeFromVideoDevice(
-          selectedDeviceId,
-          videoRef.current,
-          (result, error) => {
-            if (result) {
-              const text = result.getText();
-              console.log('[BarcodeScanner] Barcode detected:', text);
-              
-              if (text && text !== lastScanned) {
-                setLastScanned(text);
-                setScanStatus(`Detected: ${text}`);
-                
-                const isbnMatch = text.match(/\d{10,13}/);
-                if (isbnMatch) {
-                  console.log('[BarcodeScanner] Valid ISBN found:', isbnMatch[0]);
-                  onScan(isbnMatch[0]);
-                  handleClose();
-                } else {
-                  console.log('[BarcodeScanner] Not a valid ISBN format');
-                  setScanStatus('Not an ISBN barcode, keep scanning...');
-                }
-              }
-            }
-            if (error && !(error instanceof NotFoundException)) {
-              console.error('[BarcodeScanner] Scan error:', error);
-            }
-          }
-        );
-        
-        setIsScanning(true);
-        setScanStatus('Scanning... Point camera at ISBN barcode');
-        console.log('[BarcodeScanner] Scanner active');
-      }
+      setScanStatus('Camera ready - Use button below to capture ISBN');
+      setIsScanning(true);
+      console.log('[BarcodeScanner] Camera active');
     } catch (err: any) {
       console.error('[BarcodeScanner] Failed to start:', err);
       setError(err?.message || 'Failed to start camera. Please check permissions.');
@@ -101,7 +72,7 @@ export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps)
     
     try {
       setIsProcessingOCR(true);
-      setScanStatus('Capturing image for text recognition...');
+      setScanStatus('Capturing image...');
       
       const canvas = canvasRef.current;
       const video = videoRef.current;
@@ -113,10 +84,32 @@ export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps)
       canvas.height = video.videoHeight;
       context.drawImage(video, 0, 0, canvas.width, canvas.height);
       
+      setScanStatus('Enhancing image quality...');
+      
+      const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+      const data = imageData.data;
+      
+      for (let i = 0; i < data.length; i += 4) {
+        const avg = (data[i] + data[i + 1] + data[i + 2]) / 3;
+        const threshold = avg > 128 ? 255 : 0;
+        data[i] = threshold;
+        data[i + 1] = threshold;
+        data[i + 2] = threshold;
+      }
+      
+      context.putImageData(imageData, 0, 0);
+      
       setScanStatus('Reading ISBN text...');
       console.log('[BarcodeScanner] Starting OCR...');
       
-      const worker = await createWorker('eng');
+      const worker = await createWorker('eng', 1, {
+        logger: () => {}
+      });
+      
+      await worker.setParameters({
+        tessedit_char_whitelist: 'ISBN0123456789-X ',
+      });
+      
       const { data: { text } } = await worker.recognize(canvas);
       await worker.terminate();
       
@@ -134,7 +127,7 @@ export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps)
         }
       }
       
-      setScanStatus('No ISBN found. Try again or position book differently.');
+      setScanStatus('No ISBN found. Try again with better lighting or closer view.');
       setIsProcessingOCR(false);
     } catch (err: any) {
       console.error('[BarcodeScanner] OCR error:', err);
@@ -145,6 +138,12 @@ export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps)
 
   const handleClose = () => {
     console.log('[BarcodeScanner] Closing scanner');
+    
+    if (videoRef.current && videoRef.current.srcObject) {
+      const stream = videoRef.current.srcObject as MediaStream;
+      stream.getTracks().forEach(track => track.stop());
+    }
+    
     if (codeReaderRef.current) {
       codeReaderRef.current.reset();
     }
