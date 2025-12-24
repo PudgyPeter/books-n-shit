@@ -65,9 +65,8 @@ export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps)
         await videoRef.current.play();
       }
 
-      setScanStatus('Scanning for barcode and ISBN text...');
-      setIsScanning(true);
-      console.log('[BarcodeScanner] Camera active, starting dual detection');
+      setScanStatus('Initializing OCR engine...');
+      console.log('[BarcodeScanner] Camera active, initializing OCR');
       
       ocrWorkerRef.current = await createWorker('eng', 1, {
         logger: () => {}
@@ -76,6 +75,22 @@ export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps)
         tessedit_char_whitelist: 'ISBN0123456789-X ',
       });
       
+      console.log('[BarcodeScanner] OCR ready, waiting for video to be ready');
+      
+      await new Promise<void>((resolve) => {
+        const checkVideo = () => {
+          if (videoRef.current && videoRef.current.readyState === videoRef.current.HAVE_ENOUGH_DATA) {
+            console.log('[BarcodeScanner] Video is ready!');
+            resolve();
+          } else {
+            setTimeout(checkVideo, 100);
+          }
+        };
+        checkVideo();
+      });
+      
+      setScanStatus('Ready! Point at ISBN barcode or text');
+      setIsScanning(true);
       startDualDetection();
     } catch (err: any) {
       console.error('[BarcodeScanner] Failed to start:', err);
@@ -86,24 +101,34 @@ export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps)
 
   const startDualDetection = () => {
     console.log('[BarcodeScanner] Starting dual detection loop');
+    let scanCount = 0;
+    
     scanIntervalRef.current = setInterval(async () => {
-      if (!videoRef.current || !canvasRef.current || !isScanning) return;
+      if (!videoRef.current || !canvasRef.current) {
+        console.log('[BarcodeScanner] Missing refs');
+        return;
+      }
+      
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+      
+      if (video.readyState !== video.HAVE_ENOUGH_DATA) {
+        console.log('[BarcodeScanner] Video not ready, readyState:', video.readyState);
+        return;
+      }
       
       try {
-        const canvas = canvasRef.current;
-        const video = videoRef.current;
         const context = canvas.getContext('2d');
-        
-        if (!context || video.readyState !== video.HAVE_ENOUGH_DATA) {
-          console.log('[BarcodeScanner] Video not ready yet');
-          return;
-        }
+        if (!context) return;
         
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
         context.drawImage(video, 0, 0, canvas.width, canvas.height);
         
-        console.log('[BarcodeScanner] Attempting detection...');
+        scanCount++;
+        console.log(`[BarcodeScanner] Scan attempt #${scanCount}`);
+        setScanStatus(`Scanning... (attempt ${scanCount})`);
+        
         await Promise.all([
           tryBarcodeDetection(canvas),
           tryOCRDetection(canvas, context)
@@ -111,7 +136,7 @@ export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps)
       } catch (err) {
         console.error('[BarcodeScanner] Detection error:', err);
       }
-    }, 1500);
+    }, 2000);
   };
 
   const tryBarcodeDetection = async (canvas: HTMLCanvasElement) => {
@@ -278,6 +303,14 @@ export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps)
                 autoPlay
                 muted
               />
+              <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                <div className="border-4 border-green-500 rounded-lg" style={{ width: '80%', height: '60%', boxShadow: '0 0 0 9999px rgba(0,0,0,0.5)' }}>
+                  <div className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 border-green-500"></div>
+                  <div className="absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 border-green-500"></div>
+                  <div className="absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 border-green-500"></div>
+                  <div className="absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 border-green-500"></div>
+                </div>
+              </div>
               <canvas ref={canvasRef} style={{ display: 'none' }} />
             </div>
 
