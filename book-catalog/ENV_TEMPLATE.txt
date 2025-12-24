@@ -1,0 +1,6 @@
+# Environment Variables for Railway Deployment
+# Copy this to your Railway service environment variables
+
+# Path where the Railway volume is mounted
+# This should match your volume mount path in Railway dashboard
+DATA_PATH=/data
