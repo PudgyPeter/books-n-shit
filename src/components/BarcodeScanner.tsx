@@ -153,11 +153,11 @@ export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps)
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-75 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full overflow-hidden">
-        <div className="bg-blue-600 text-white p-4 flex items-center justify-between">
+      <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] flex flex-col overflow-hidden">
+        <div className="bg-blue-600 text-white p-4 flex items-center justify-between flex-shrink-0">
           <div className="flex items-center gap-2">
             <CameraIcon className="w-6 h-6" />
-            <h3 className="text-lg font-semibold">Scan ISBN Barcode</h3>
+            <h3 className="text-lg font-semibold">Scan ISBN</h3>
           </div>
           <button
             onClick={handleClose}
@@ -167,23 +167,23 @@ export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps)
           </button>
         </div>
 
-        <div className="p-6">
+        <div className="flex-1 overflow-y-auto p-4 md:p-6">
           {error ? (
             <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-4">
               {error}
             </div>
           ) : null}
 
-          <div className="relative bg-gray-900 rounded-lg overflow-hidden">
+          <div className="relative bg-gray-900 rounded-lg overflow-hidden mb-4">
             <video
               ref={videoRef}
               className="w-full h-auto"
-              style={{ maxHeight: '400px' }}
+              style={{ maxHeight: '300px' }}
             />
             <canvas ref={canvasRef} className="hidden" />
           </div>
 
-          <div className="mt-4 text-center">
+          <div className="text-center">
             <div className={`text-sm font-medium mb-3 ${isScanning ? 'text-green-600' : 'text-gray-600'}`}>
               {scanStatus}
             </div>
@@ -191,17 +191,17 @@ export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps)
             <button
               onClick={captureAndProcessOCR}
               disabled={isProcessingOCR}
-              className="px-6 py-3 bg-purple-600 text-white font-medium rounded-lg hover:bg-purple-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2 mx-auto mb-3"
+              className="w-full px-6 py-3 bg-purple-600 text-white font-medium rounded-lg hover:bg-purple-700 active:bg-purple-800 disabled:bg-gray-400 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2 mb-3"
             >
               <CaptureIcon className="w-5 h-5" />
               {isProcessingOCR ? 'Reading ISBN Text...' : 'Capture & Read ISBN Text'}
             </button>
             
-            <p className="text-xs text-gray-500">
-              Barcode not working? Click the button above to read the ISBN text instead
+            <p className="text-xs text-gray-500 mb-1">
+              Barcode not working? Use the button above to read the ISBN text
             </p>
-            <p className="text-xs text-gray-400 mt-1">
-              Tip: Ensure good lighting and hold the book 6-12 inches from the camera
+            <p className="text-xs text-gray-400">
+              Tip: Good lighting helps. Hold book 6-12 inches away
             </p>
           </div>
         </div>
