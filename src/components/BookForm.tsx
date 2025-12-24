@@ -71,7 +71,8 @@ export default function BookForm({ onSubmit, authors }: BookFormProps) {
       const response = await fetch(`/api/isbn?isbn=${isbn}`);
       
       if (!response.ok) {
-        throw new Error('Book not found for this ISBN');
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Book not found in Open Library. You can still enter details manually.');
       }
       
       const data = await response.json();
@@ -80,7 +81,7 @@ export default function BookForm({ onSubmit, authors }: BookFormProps) {
       if (data.author) setValue('author', data.author);
       if (data.isbn) setValue('isbn', data.isbn);
     } catch (err: any) {
-      setIsbnError(err.message || 'Failed to fetch book data');
+      setIsbnError(err.message || 'Book not found. ISBN saved - enter title and author manually.');
     } finally {
       setIsLoadingIsbn(false);
     }
