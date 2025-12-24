@@ -22,6 +22,7 @@ export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps)
   const [scanStatus, setScanStatus] = useState<string>('Initializing...');
   const [manualIsbn, setManualIsbn] = useState<string>('');
   const [cameraInfo, setCameraInfo] = useState<string>('');
+  const [allCameras, setAllCameras] = useState<string[]>([]);
 
   useEffect(() => {
     console.log('[BarcodeScanner] Component mounted');
@@ -60,13 +61,17 @@ export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps)
       const devices = await navigator.mediaDevices.enumerateDevices();
       const videoDevices = devices.filter(device => device.kind === 'videoinput');
       console.log('[BarcodeScanner] Available cameras:', videoDevices.length);
-      videoDevices.forEach((device, index) => {
-        console.log(`[BarcodeScanner] Camera ${index}: ${device.label || 'Unknown'} (${device.deviceId})`);
+      
+      const cameraList = videoDevices.map((device, index) => {
+        console.log(`[BarcodeScanner] Camera ${index}: ${device.label || 'Unknown'}`);
+        return `${index}: ${device.label}`;
       });
+      setAllCameras(cameraList);
       
       const backCameras = videoDevices.filter(device => 
         device.label.toLowerCase().includes('back') || 
         device.label.toLowerCase().includes('rear') ||
+        device.label.toLowerCase().includes('camera 2') ||
         device.label.toLowerCase().includes('environment')
       );
       
@@ -74,13 +79,21 @@ export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps)
       
       let selectedCamera = null;
       if (backCameras.length > 0) {
-        const mainCamera = backCameras.find(cam => 
-          !cam.label.toLowerCase().includes('wide') &&
-          !cam.label.toLowerCase().includes('ultra') &&
-          !cam.label.toLowerCase().includes('0.5')
-        ) || backCameras[backCameras.length - 1];
+        // Try to find main camera by excluding wide-angle keywords
+        let mainCamera = backCameras.find(cam => {
+          const label = cam.label.toLowerCase();
+          return !label.includes('wide') && 
+                 !label.includes('ultra') && 
+                 !label.includes('0.5') &&
+                 !label.includes('0, facing');
+        });
         
-        selectedCamera = mainCamera;
+        // If no main camera found, prefer camera with index 1 (usually main on Samsung)
+        if (!mainCamera && backCameras.length > 1) {
+          mainCamera = backCameras[1];
+        }
+        
+        selectedCamera = mainCamera || backCameras[0];
         console.log('[BarcodeScanner] Selected camera:', selectedCamera.label);
       }
       
@@ -396,6 +409,16 @@ export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps)
                   }}>
                     {cameraInfo}
                   </div>
+                )}
+                {allCameras.length > 0 && (
+                  <details className="text-xs text-gray-600 mb-2">
+                    <summary className="cursor-pointer hover:text-gray-900">Available Cameras ({allCameras.length})</summary>
+                    <div className="mt-2 space-y-1 bg-gray-50 p-2 rounded">
+                      {allCameras.map((cam, idx) => (
+                        <div key={idx} className="font-mono">{cam}</div>
+                      ))}
+                    </div>
+                  </details>
                 )}
                 <p className="text-xs text-gray-500">
                   Scanning automatically with barcode + OCR detection
