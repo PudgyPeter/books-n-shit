@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Html5Qrcode } from 'html5-qrcode';
+import { BrowserMultiFormatReader, NotFoundException } from '@zxing/library';
 import { CameraIcon, XMarkIcon } from '@heroicons/react/24/outline';
 
 interface BarcodeScannerProps {
@@ -10,19 +10,20 @@ interface BarcodeScannerProps {
 }
 
 export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps) {
-  const scannerRef = useRef<Html5Qrcode | null>(null);
-  const [isScanning, setIsScanning] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const codeReaderRef = useRef<BrowserMultiFormatReader | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [lastScanned, setLastScanned] = useState<string>('');
 
   useEffect(() => {
-    const scanner = new Html5Qrcode('barcode-reader');
-    scannerRef.current = scanner;
+    const codeReader = new BrowserMultiFormatReader();
+    codeReaderRef.current = codeReader;
 
     startScanning();
 
     return () => {
-      if (scannerRef.current?.isScanning) {
-        scannerRef.current.stop().catch(console.error);
+      if (codeReaderRef.current) {
+        codeReaderRef.current.reset();
       }
     };
   }, []);
@@ -30,36 +31,46 @@ export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps)
   const startScanning = async () => {
     try {
       setError(null);
-      setIsScanning(true);
+      
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const videoDevices = devices.filter(device => device.kind === 'videoinput');
+      
+      if (videoDevices.length === 0) {
+        throw new Error('No camera found');
+      }
 
-      await scannerRef.current?.start(
-        { facingMode: 'environment' },
-        {
-          fps: 10,
-          qrbox: { width: 250, height: 150 },
-        },
-        (decodedText) => {
-          const isbnMatch = decodedText.match(/\d{10,13}/);
-          if (isbnMatch) {
-            onScan(isbnMatch[0]);
-            handleClose();
+      const selectedDeviceId = videoDevices[videoDevices.length - 1]?.deviceId;
+
+      if (codeReaderRef.current && videoRef.current) {
+        codeReaderRef.current.decodeFromVideoDevice(
+          selectedDeviceId,
+          videoRef.current,
+          (result, error) => {
+            if (result) {
+              const text = result.getText();
+              if (text && text !== lastScanned) {
+                setLastScanned(text);
+                const isbnMatch = text.match(/\d{10,13}/);
+                if (isbnMatch) {
+                  onScan(isbnMatch[0]);
+                  handleClose();
+                }
+              }
+            }
+            if (error && !(error instanceof NotFoundException)) {
+              console.error('Scan error:', error);
+            }
           }
-        },
-        () => {}
-      );
+        );
+      }
     } catch (err: any) {
       setError(err?.message || 'Failed to start camera. Please check permissions.');
-      setIsScanning(false);
     }
   };
 
-  const handleClose = async () => {
-    try {
-      if (scannerRef.current?.isScanning) {
-        await scannerRef.current.stop();
-      }
-    } catch (err) {
-      console.error('Error stopping scanner:', err);
+  const handleClose = () => {
+    if (codeReaderRef.current) {
+      codeReaderRef.current.reset();
     }
     onClose();
   };
@@ -88,12 +99,19 @@ export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps)
           ) : null}
 
           <div className="relative bg-gray-900 rounded-lg overflow-hidden">
-            <div id="barcode-reader" className="w-full"></div>
+            <video
+              ref={videoRef}
+              className="w-full h-auto"
+              style={{ maxHeight: '400px' }}
+            />
           </div>
 
           <div className="mt-4 text-center text-sm text-gray-600">
-            <p>Position the ISBN barcode within the frame</p>
-            <p className="mt-1">The scanner will automatically detect and read the barcode</p>
+            <p className="font-medium">Position the ISBN barcode in the camera view</p>
+            <p className="mt-1">Hold steady - scanning continuously...</p>
+            <p className="mt-2 text-xs text-gray-500">
+              Tip: Ensure good lighting and hold the book 6-12 inches from the camera
+            </p>
           </div>
         </div>
       </div>
