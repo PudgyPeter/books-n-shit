@@ -21,6 +21,7 @@ export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps)
   const [isScanning, setIsScanning] = useState(false);
   const [scanStatus, setScanStatus] = useState<string>('Initializing...');
   const [manualIsbn, setManualIsbn] = useState<string>('');
+  const [cameraInfo, setCameraInfo] = useState<string>('');
 
   useEffect(() => {
     console.log('[BarcodeScanner] Component mounted');
@@ -117,6 +118,10 @@ export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps)
         height: settings.height,
         facingMode: settings.facingMode
       });
+      
+      const cameraName = selectedCamera?.label || 'Default Camera';
+      const resolution = `${settings.width}x${settings.height}`;
+      setCameraInfo(`📷 ${cameraName} | ${resolution}`);
       
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
@@ -374,9 +379,14 @@ export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps)
 
             <div className="space-y-4">
               <div className="text-center">
-                <div className={`text-sm font-medium mb-3 ${isScanning ? 'text-green-600' : 'text-gray-600'}`}>
+                <div className={`text-sm font-medium mb-2 ${isScanning ? 'text-green-600' : 'text-gray-600'}`}>
                   {scanStatus}
                 </div>
+                {cameraInfo && (
+                  <div className="text-xs text-blue-600 font-mono mb-2 bg-blue-50 px-2 py-1 rounded">
+                    {cameraInfo}
+                  </div>
+                )}
                 <p className="text-xs text-gray-500">
                   Scanning automatically with barcode + OCR detection
                 </p>
