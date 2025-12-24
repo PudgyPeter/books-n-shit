@@ -79,21 +79,24 @@ export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps)
       
       let selectedCamera = null;
       if (backCameras.length > 0) {
-        // Try to find main camera by excluding wide-angle keywords
-        let mainCamera = backCameras.find(cam => {
-          const label = cam.label.toLowerCase();
-          return !label.includes('wide') && 
-                 !label.includes('ultra') && 
-                 !label.includes('0.5') &&
-                 !label.includes('0, facing');
-        });
+        // For Samsung devices, camera2 0 is usually the main camera
+        // Look for camera2 0 first
+        let mainCamera = backCameras.find(cam => 
+          cam.label.toLowerCase().includes('camera2 0')
+        );
         
-        // If no main camera found, prefer camera with index 1 (usually main on Samsung)
-        if (!mainCamera && backCameras.length > 1) {
-          mainCamera = backCameras[1];
+        // If not found, try to find main camera by excluding wide-angle keywords
+        if (!mainCamera) {
+          mainCamera = backCameras.find(cam => {
+            const label = cam.label.toLowerCase();
+            return !label.includes('wide') && 
+                   !label.includes('ultra') && 
+                   !label.includes('0.5');
+          });
         }
         
-        selectedCamera = mainCamera || backCameras[0];
+        // Fallback to last back camera
+        selectedCamera = mainCamera || backCameras[backCameras.length - 1];
         console.log('[BarcodeScanner] Selected camera:', selectedCamera.label);
       }
       
