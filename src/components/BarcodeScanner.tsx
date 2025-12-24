@@ -14,14 +14,18 @@ export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps)
   const codeReaderRef = useRef<BrowserMultiFormatReader | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lastScanned, setLastScanned] = useState<string>('');
+  const [isScanning, setIsScanning] = useState(false);
+  const [scanStatus, setScanStatus] = useState<string>('Initializing...');
 
   useEffect(() => {
+    console.log('[BarcodeScanner] Component mounted');
     const codeReader = new BrowserMultiFormatReader();
     codeReaderRef.current = codeReader;
 
     startScanning();
 
     return () => {
+      console.log('[BarcodeScanner] Component unmounting, cleaning up');
       if (codeReaderRef.current) {
         codeReaderRef.current.reset();
       }
@@ -30,45 +34,67 @@ export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps)
 
   const startScanning = async () => {
     try {
+      console.log('[BarcodeScanner] Starting scan process...');
       setError(null);
+      setScanStatus('Requesting camera access...');
       
       const devices = await navigator.mediaDevices.enumerateDevices();
       const videoDevices = devices.filter(device => device.kind === 'videoinput');
+      
+      console.log('[BarcodeScanner] Found cameras:', videoDevices.length);
       
       if (videoDevices.length === 0) {
         throw new Error('No camera found');
       }
 
       const selectedDeviceId = videoDevices[videoDevices.length - 1]?.deviceId;
+      console.log('[BarcodeScanner] Using camera:', selectedDeviceId);
+
+      setScanStatus('Starting camera...');
 
       if (codeReaderRef.current && videoRef.current) {
-        codeReaderRef.current.decodeFromVideoDevice(
+        await codeReaderRef.current.decodeFromVideoDevice(
           selectedDeviceId,
           videoRef.current,
           (result, error) => {
             if (result) {
               const text = result.getText();
+              console.log('[BarcodeScanner] Barcode detected:', text);
+              
               if (text && text !== lastScanned) {
                 setLastScanned(text);
+                setScanStatus(`Detected: ${text}`);
+                
                 const isbnMatch = text.match(/\d{10,13}/);
                 if (isbnMatch) {
+                  console.log('[BarcodeScanner] Valid ISBN found:', isbnMatch[0]);
                   onScan(isbnMatch[0]);
                   handleClose();
+                } else {
+                  console.log('[BarcodeScanner] Not a valid ISBN format');
+                  setScanStatus('Not an ISBN barcode, keep scanning...');
                 }
               }
             }
             if (error && !(error instanceof NotFoundException)) {
-              console.error('Scan error:', error);
+              console.error('[BarcodeScanner] Scan error:', error);
             }
           }
         );
+        
+        setIsScanning(true);
+        setScanStatus('Scanning... Point camera at ISBN barcode');
+        console.log('[BarcodeScanner] Scanner active');
       }
     } catch (err: any) {
+      console.error('[BarcodeScanner] Failed to start:', err);
       setError(err?.message || 'Failed to start camera. Please check permissions.');
+      setScanStatus('Error occurred');
     }
   };
 
   const handleClose = () => {
+    console.log('[BarcodeScanner] Closing scanner');
     if (codeReaderRef.current) {
       codeReaderRef.current.reset();
     }
@@ -106,11 +132,15 @@ export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps)
             />
           </div>
 
-          <div className="mt-4 text-center text-sm text-gray-600">
-            <p className="font-medium">Position the ISBN barcode in the camera view</p>
-            <p className="mt-1">Hold steady - scanning continuously...</p>
-            <p className="mt-2 text-xs text-gray-500">
+          <div className="mt-4 text-center">
+            <div className={`text-sm font-medium mb-2 ${isScanning ? 'text-green-600' : 'text-gray-600'}`}>
+              {scanStatus}
+            </div>
+            <p className="text-xs text-gray-500">
               Tip: Ensure good lighting and hold the book 6-12 inches from the camera
+            </p>
+            <p className="text-xs text-gray-400 mt-2">
+              Check browser console (F12) for detailed scanning logs
             </p>
           </div>
         </div>
