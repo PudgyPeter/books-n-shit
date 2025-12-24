@@ -52,6 +52,11 @@ export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps)
       
       let stream: MediaStream | null = null;
       
+      // First, request permission to get camera labels
+      const tempStream = await navigator.mediaDevices.getUserMedia({ video: true });
+      tempStream.getTracks().forEach(track => track.stop());
+      
+      // Now enumerate with proper labels
       const devices = await navigator.mediaDevices.enumerateDevices();
       const videoDevices = devices.filter(device => device.kind === 'videoinput');
       console.log('[BarcodeScanner] Available cameras:', videoDevices.length);
@@ -119,9 +124,11 @@ export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps)
         facingMode: settings.facingMode
       });
       
-      const cameraName = selectedCamera?.label || 'Default Camera';
+      const cameraLabel = selectedCamera?.label || videoTrack.label || 'Camera';
       const resolution = `${settings.width}x${settings.height}`;
-      setCameraInfo(`📷 ${cameraName} | ${resolution}`);
+      const isWideAngle = cameraLabel.toLowerCase().includes('wide') || cameraLabel.toLowerCase().includes('0.5');
+      const cameraType = isWideAngle ? '⚠️ Wide-Angle' : '✓ Main';
+      setCameraInfo(`${cameraType}: ${cameraLabel} | ${resolution}`);
       
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
@@ -383,7 +390,10 @@ export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps)
                   {scanStatus}
                 </div>
                 {cameraInfo && (
-                  <div className="text-xs text-blue-600 font-mono mb-2 bg-blue-50 px-2 py-1 rounded">
+                  <div className="text-xs font-mono mb-2 px-2 py-1 rounded" style={{
+                    backgroundColor: cameraInfo.includes('⚠️') ? '#fef2f2' : '#eff6ff',
+                    color: cameraInfo.includes('⚠️') ? '#dc2626' : '#2563eb'
+                  }}>
                     {cameraInfo}
                   </div>
                 )}
