@@ -49,16 +49,40 @@ export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps)
       setError(null);
       setScanStatus('Requesting camera access...');
       
-      const constraints = {
-        video: {
-          facingMode: 'environment',
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-          aspectRatio: { ideal: 16/9 }
-        }
-      };
-
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      let stream: MediaStream | null = null;
+      
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const videoDevices = devices.filter(device => device.kind === 'videoinput');
+        console.log('[BarcodeScanner] Available cameras:', videoDevices.length);
+        
+        const constraints = {
+          video: {
+            facingMode: { exact: 'environment' },
+            width: { ideal: 1920, min: 1280 },
+            height: { ideal: 1080, min: 720 },
+            aspectRatio: { ideal: 16/9 },
+            focusMode: { ideal: 'continuous' }
+          } as MediaTrackConstraints
+        };
+        
+        console.log('[BarcodeScanner] Attempting main camera with exact constraints');
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+      } catch (err) {
+        console.log('[BarcodeScanner] Exact constraints failed, trying fallback');
+        const fallbackConstraints = {
+          video: {
+            facingMode: 'environment',
+            width: { ideal: 1920 },
+            height: { ideal: 1080 }
+          }
+        };
+        stream = await navigator.mediaDevices.getUserMedia(fallbackConstraints);
+      }
+      
+      if (!stream) {
+        throw new Error('Failed to get camera stream');
+      }
       
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
