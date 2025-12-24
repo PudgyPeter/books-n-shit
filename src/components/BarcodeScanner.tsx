@@ -19,6 +19,7 @@ export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps)
   const [isScanning, setIsScanning] = useState(false);
   const [scanStatus, setScanStatus] = useState<string>('Initializing...');
   const [isProcessingOCR, setIsProcessingOCR] = useState(false);
+  const [manualIsbn, setManualIsbn] = useState<string>('');
 
   useEffect(() => {
     console.log('[BarcodeScanner] Component mounted');
@@ -136,6 +137,17 @@ export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps)
     }
   };
 
+  const handleManualSubmit = () => {
+    const cleanIsbn = manualIsbn.replace(/[^0-9X]/gi, '');
+    if (cleanIsbn.length >= 10 && cleanIsbn.length <= 13) {
+      console.log('[BarcodeScanner] Manual ISBN entered:', cleanIsbn);
+      onScan(cleanIsbn);
+      handleClose();
+    } else {
+      setScanStatus('Please enter a valid 10 or 13 digit ISBN');
+    }
+  };
+
   const handleClose = () => {
     console.log('[BarcodeScanner] Closing scanner');
     
@@ -151,57 +163,91 @@ export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps)
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-75 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] flex flex-col overflow-hidden">
-        <div className="bg-blue-600 text-white p-4 flex items-center justify-between flex-shrink-0">
-          <div className="flex items-center gap-2">
-            <CameraIcon className="w-6 h-6" />
-            <h3 className="text-lg font-semibold">Scan ISBN</h3>
-          </div>
-          <button
-            onClick={handleClose}
-            className="p-1 hover:bg-blue-700 rounded-lg transition-colors"
-          >
-            <XMarkIcon className="w-6 h-6" />
-          </button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-4 md:p-6">
-          {error ? (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-4">
-              {error}
+    <div className="fixed inset-0 bg-black bg-opacity-75 z-50 overflow-y-auto" style={{ WebkitOverflowScrolling: 'touch' }}>
+      <div className="min-h-screen flex items-center justify-center p-4">
+        <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full">
+          <div className="bg-blue-600 text-white p-4 flex items-center justify-between rounded-t-xl">
+            <div className="flex items-center gap-2">
+              <CameraIcon className="w-6 h-6" />
+              <h3 className="text-lg font-semibold">Scan ISBN</h3>
             </div>
-          ) : null}
-
-          <div className="relative bg-gray-900 rounded-lg overflow-hidden mb-4">
-            <video
-              ref={videoRef}
-              className="w-full h-auto"
-              style={{ maxHeight: '300px' }}
-            />
-            <canvas ref={canvasRef} className="hidden" />
-          </div>
-
-          <div className="text-center">
-            <div className={`text-sm font-medium mb-3 ${isScanning ? 'text-green-600' : 'text-gray-600'}`}>
-              {scanStatus}
-            </div>
-            
             <button
-              onClick={captureAndProcessOCR}
-              disabled={isProcessingOCR}
-              className="w-full px-6 py-3 bg-purple-600 text-white font-medium rounded-lg hover:bg-purple-700 active:bg-purple-800 disabled:bg-gray-400 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2 mb-3"
+              onClick={handleClose}
+              className="p-1 hover:bg-blue-700 rounded-lg transition-colors"
             >
-              <CaptureIcon className="w-5 h-5" />
-              {isProcessingOCR ? 'Reading ISBN Text...' : 'Capture & Read ISBN Text'}
+              <XMarkIcon className="w-6 h-6" />
             </button>
-            
-            <p className="text-xs text-gray-500 mb-1">
-              Barcode not working? Use the button above to read the ISBN text
-            </p>
-            <p className="text-xs text-gray-400">
-              Tip: Good lighting helps. Hold book 6-12 inches away
-            </p>
+          </div>
+
+          <div className="p-4 md:p-6">
+            {error ? (
+              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-4">
+                {error}
+              </div>
+            ) : null}
+
+            <div className="relative bg-gray-900 rounded-lg overflow-hidden mb-4">
+              <video
+                ref={videoRef}
+                className="w-full h-auto"
+                style={{ maxHeight: '300px' }}
+                playsInline
+                autoPlay
+                muted
+              />
+              <canvas ref={canvasRef} style={{ display: 'none' }} />
+            </div>
+
+            <div className="space-y-4">
+              <div className="text-center">
+                <div className={`text-sm font-medium mb-3 ${isScanning ? 'text-green-600' : 'text-gray-600'}`}>
+                  {scanStatus}
+                </div>
+              </div>
+              
+              <button
+                type="button"
+                onClick={captureAndProcessOCR}
+                disabled={isProcessingOCR}
+                style={{ display: 'block', width: '100%' }}
+                className="px-6 py-3 bg-purple-600 text-white font-medium rounded-lg active:bg-purple-800 disabled:bg-gray-400 disabled:cursor-not-allowed"
+              >
+                {isProcessingOCR ? 'Reading ISBN Text...' : '📷 Capture & Read ISBN Text'}
+              </button>
+              
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-gray-300"></div>
+                </div>
+                <div className="relative flex justify-center text-sm">
+                  <span className="px-2 bg-white text-gray-500">or enter manually</span>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <input
+                  type="text"
+                  value={manualIsbn}
+                  onChange={(e) => setManualIsbn(e.target.value)}
+                  placeholder="Enter ISBN (e.g., 9780892790796)"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  inputMode="numeric"
+                  pattern="[0-9X-]*"
+                />
+                <button
+                  type="button"
+                  onClick={handleManualSubmit}
+                  style={{ display: 'block', width: '100%' }}
+                  className="px-6 py-3 bg-blue-600 text-white font-medium rounded-lg active:bg-blue-800"
+                >
+                  Submit ISBN
+                </button>
+              </div>
+              
+              <p className="text-xs text-gray-500 text-center">
+                Tip: Good lighting helps OCR. Hold book 6-12 inches away
+              </p>
+            </div>
           </div>
         </div>
       </div>
