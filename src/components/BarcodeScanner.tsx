@@ -51,25 +51,50 @@ export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps)
       
       let stream: MediaStream | null = null;
       
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const videoDevices = devices.filter(device => device.kind === 'videoinput');
+      console.log('[BarcodeScanner] Available cameras:', videoDevices.length);
+      videoDevices.forEach((device, index) => {
+        console.log(`[BarcodeScanner] Camera ${index}: ${device.label || 'Unknown'} (${device.deviceId})`);
+      });
+      
+      const backCameras = videoDevices.filter(device => 
+        device.label.toLowerCase().includes('back') || 
+        device.label.toLowerCase().includes('rear') ||
+        device.label.toLowerCase().includes('environment')
+      );
+      
+      console.log('[BarcodeScanner] Back cameras found:', backCameras.length);
+      
+      let selectedCamera = null;
+      if (backCameras.length > 0) {
+        const mainCamera = backCameras.find(cam => 
+          !cam.label.toLowerCase().includes('wide') &&
+          !cam.label.toLowerCase().includes('ultra') &&
+          !cam.label.toLowerCase().includes('0.5')
+        ) || backCameras[backCameras.length - 1];
+        
+        selectedCamera = mainCamera;
+        console.log('[BarcodeScanner] Selected camera:', selectedCamera.label);
+      }
+      
       try {
-        const devices = await navigator.mediaDevices.enumerateDevices();
-        const videoDevices = devices.filter(device => device.kind === 'videoinput');
-        console.log('[BarcodeScanner] Available cameras:', videoDevices.length);
-        
-        const constraints = {
-          video: {
-            facingMode: { exact: 'environment' },
-            width: { ideal: 1920, min: 1280 },
-            height: { ideal: 1080, min: 720 },
-            aspectRatio: { ideal: 16/9 },
-            focusMode: { ideal: 'continuous' }
-          } as MediaTrackConstraints
-        };
-        
-        console.log('[BarcodeScanner] Attempting main camera with exact constraints');
-        stream = await navigator.mediaDevices.getUserMedia(constraints);
+        if (selectedCamera) {
+          console.log('[BarcodeScanner] Attempting with specific deviceId');
+          const constraints = {
+            video: {
+              deviceId: { exact: selectedCamera.deviceId },
+              width: { ideal: 1920 },
+              height: { ideal: 1080 },
+              focusMode: { ideal: 'continuous' }
+            } as MediaTrackConstraints
+          };
+          stream = await navigator.mediaDevices.getUserMedia(constraints);
+        } else {
+          throw new Error('No suitable camera found, using fallback');
+        }
       } catch (err) {
-        console.log('[BarcodeScanner] Exact constraints failed, trying fallback');
+        console.log('[BarcodeScanner] Specific camera failed, trying facingMode');
         const fallbackConstraints = {
           video: {
             facingMode: 'environment',
@@ -83,6 +108,15 @@ export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps)
       if (!stream) {
         throw new Error('Failed to get camera stream');
       }
+      
+      const videoTrack = stream.getVideoTracks()[0];
+      const settings = videoTrack.getSettings();
+      console.log('[BarcodeScanner] Active camera settings:', {
+        deviceId: settings.deviceId,
+        width: settings.width,
+        height: settings.height,
+        facingMode: settings.facingMode
+      });
       
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
