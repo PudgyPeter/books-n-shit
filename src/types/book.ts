@@ -6,10 +6,12 @@ export interface Book {
   author: string;
   coverStyle: CoverStyle;
   dateAdded: string;
+  isbn?: string;
 }
 
 export interface BookFormData {
   title: string;
   author: string;
   coverStyle: CoverStyle;
+  isbn?: string;
 }

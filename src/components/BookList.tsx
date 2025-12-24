@@ -30,6 +30,9 @@ export default function BookList({ books, onDelete }: BookListProps) {
                 Author
               </th>
               <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                ISBN
+              </th>
+              <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
                 Cover Style
               </th>
               <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
@@ -48,6 +51,9 @@ export default function BookList({ books, onDelete }: BookListProps) {
                 </td>
                 <td className="px-6 py-4 text-sm text-gray-700">
                   {book.author}
+                </td>
+                <td className="px-6 py-4 text-sm text-gray-600">
+                  {book.isbn || <span className="text-gray-400 italic">N/A</span>}
                 </td>
                 <td className="px-6 py-4 text-sm text-gray-700">
                   <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">

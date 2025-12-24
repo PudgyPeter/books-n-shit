@@ -3,7 +3,10 @@
 import { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { BookFormData, CoverStyle } from '@/types/book';
-import { PlusIcon } from '@heroicons/react/24/outline';
+import { PlusIcon, CameraIcon } from '@heroicons/react/24/outline';
+import dynamic from 'next/dynamic';
+
+const BarcodeScanner = dynamic(() => import('./BarcodeScanner'), { ssr: false });
 
 interface BookFormProps {
   onSubmit: (data: BookFormData) => void;
@@ -23,6 +26,9 @@ export default function BookForm({ onSubmit, authors }: BookFormProps) {
   const { register, handleSubmit, reset, watch, setValue } = useForm<BookFormData>();
   const [authorSuggestion, setAuthorSuggestion] = useState<string>('');
   const [showSuggestion, setShowSuggestion] = useState(false);
+  const [showScanner, setShowScanner] = useState(false);
+  const [isLoadingIsbn, setIsLoadingIsbn] = useState(false);
+  const [isbnError, setIsbnError] = useState<string | null>(null);
   
   const authorInput = watch('author');
 
@@ -55,6 +61,34 @@ export default function BookForm({ onSubmit, authors }: BookFormProps) {
       setValue('author', authorSuggestion);
       setShowSuggestion(false);
     }
+  };
+
+  const fetchBookDataFromIsbn = async (isbn: string) => {
+    setIsLoadingIsbn(true);
+    setIsbnError(null);
+    
+    try {
+      const response = await fetch(`/api/isbn?isbn=${isbn}`);
+      
+      if (!response.ok) {
+        throw new Error('Book not found for this ISBN');
+      }
+      
+      const data = await response.json();
+      
+      if (data.title) setValue('title', data.title);
+      if (data.author) setValue('author', data.author);
+      if (data.isbn) setValue('isbn', data.isbn);
+    } catch (err: any) {
+      setIsbnError(err.message || 'Failed to fetch book data');
+    } finally {
+      setIsLoadingIsbn(false);
+    }
+  };
+
+  const handleBarcodeScan = (isbn: string) => {
+    setValue('isbn', isbn);
+    fetchBookDataFromIsbn(isbn);
   };
 
   return (
@@ -104,6 +138,36 @@ export default function BookForm({ onSubmit, authors }: BookFormProps) {
         </div>
 
         <div>
+          <label htmlFor="isbn" className="block text-sm font-medium text-gray-700 mb-2">
+            ISBN (Optional)
+          </label>
+          <div className="flex gap-2">
+            <input
+              id="isbn"
+              type="text"
+              {...register('isbn')}
+              className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+              placeholder="Enter ISBN or scan barcode"
+            />
+            <button
+              type="button"
+              onClick={() => setShowScanner(true)}
+              className="px-4 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 focus:ring-4 focus:ring-purple-300 transition-all flex items-center gap-2"
+              title="Scan barcode"
+            >
+              <CameraIcon className="w-5 h-5" />
+              Scan
+            </button>
+          </div>
+          {isLoadingIsbn && (
+            <p className="text-xs text-blue-600 mt-1">Loading book data...</p>
+          )}
+          {isbnError && (
+            <p className="text-xs text-red-600 mt-1">{isbnError}</p>
+          )}
+        </div>
+
+        <div>
           <label htmlFor="coverStyle" className="block text-sm font-medium text-gray-700 mb-2">
             Cover Style
           </label>
@@ -130,6 +194,13 @@ export default function BookForm({ onSubmit, authors }: BookFormProps) {
         <PlusIcon className="w-5 h-5" />
         Add Book
       </button>
+
+      {showScanner && (
+        <BarcodeScanner
+          onScan={handleBarcodeScan}
+          onClose={() => setShowScanner(false)}
+        />
+      )}
     </form>
   );
 }
