@@ -147,17 +147,17 @@ export default function BookForm({ onSubmit, authors }: BookFormProps) {
               id="isbn"
               type="text"
               {...register('isbn')}
-              className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+              className="flex-1 min-w-0 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
               placeholder="Enter ISBN or scan barcode"
             />
             <button
               type="button"
               onClick={() => setShowScanner(true)}
-              className="px-4 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 focus:ring-4 focus:ring-purple-300 transition-all flex items-center gap-2"
+              className="flex-shrink-0 px-4 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 active:bg-purple-800 focus:ring-4 focus:ring-purple-300 transition-all flex items-center gap-2"
               title="Scan barcode"
             >
               <CameraIcon className="w-5 h-5" />
-              Scan
+              <span className="hidden sm:inline">Scan</span>
             </button>
           </div>
           {isLoadingIsbn && (
