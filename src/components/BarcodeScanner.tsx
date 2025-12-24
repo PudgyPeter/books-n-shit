@@ -14,11 +14,12 @@ export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps)
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const codeReaderRef = useRef<BrowserMultiFormatReader | null>(null);
+  const scanIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const ocrWorkerRef = useRef<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [lastScanned, setLastScanned] = useState<string>('');
   const [isScanning, setIsScanning] = useState(false);
   const [scanStatus, setScanStatus] = useState<string>('Initializing...');
-  const [isProcessingOCR, setIsProcessingOCR] = useState(false);
   const [manualIsbn, setManualIsbn] = useState<string>('');
 
   useEffect(() => {
@@ -30,6 +31,12 @@ export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps)
 
     return () => {
       console.log('[BarcodeScanner] Component unmounting, cleaning up');
+      if (scanIntervalRef.current) {
+        clearInterval(scanIntervalRef.current);
+      }
+      if (ocrWorkerRef.current) {
+        ocrWorkerRef.current.terminate();
+      }
       if (codeReaderRef.current) {
         codeReaderRef.current.reset();
       }
@@ -58,9 +65,18 @@ export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps)
         await videoRef.current.play();
       }
 
-      setScanStatus('Camera ready - Use button below to capture ISBN');
+      setScanStatus('Scanning for barcode and ISBN text...');
       setIsScanning(true);
-      console.log('[BarcodeScanner] Camera active');
+      console.log('[BarcodeScanner] Camera active, starting dual detection');
+      
+      ocrWorkerRef.current = await createWorker('eng', 1, {
+        logger: () => {}
+      });
+      await ocrWorkerRef.current.setParameters({
+        tessedit_char_whitelist: 'ISBN0123456789-X ',
+      });
+      
+      startDualDetection();
     } catch (err: any) {
       console.error('[BarcodeScanner] Failed to start:', err);
       setError(err?.message || 'Failed to start camera. Please check permissions.');
@@ -68,24 +84,62 @@ export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps)
     }
   };
 
-  const captureAndProcessOCR = async () => {
-    if (!videoRef.current || !canvasRef.current) return;
-    
+  const startDualDetection = () => {
+    scanIntervalRef.current = setInterval(async () => {
+      if (!videoRef.current || !canvasRef.current || !isScanning) return;
+      
+      try {
+        const canvas = canvasRef.current;
+        const video = videoRef.current;
+        const context = canvas.getContext('2d');
+        
+        if (!context || video.readyState !== video.HAVE_ENOUGH_DATA) return;
+        
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+        
+        tryBarcodeDetection(canvas);
+        tryOCRDetection(canvas, context);
+      } catch (err) {
+        console.error('[BarcodeScanner] Detection error:', err);
+      }
+    }, 1000);
+  };
+
+  const tryBarcodeDetection = async (canvas: HTMLCanvasElement) => {
     try {
-      setIsProcessingOCR(true);
-      setScanStatus('Capturing image...');
+      if (!codeReaderRef.current) return;
       
-      const canvas = canvasRef.current;
-      const video = videoRef.current;
-      const context = canvas.getContext('2d');
+      const imageData = canvas.toDataURL('image/png');
+      const img = new Image();
+      img.src = imageData;
       
-      if (!context) return;
+      await new Promise((resolve) => {
+        img.onload = resolve;
+      });
       
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      context.drawImage(video, 0, 0, canvas.width, canvas.height);
-      
-      setScanStatus('Enhancing image quality...');
+      const result = await codeReaderRef.current.decodeFromImageElement(img);
+      if (result) {
+        const text = result.getText();
+        const isbnMatch = text.match(/\d{10,13}/);
+        if (isbnMatch && isbnMatch[0] !== lastScanned) {
+          console.log('[BarcodeScanner] Barcode detected:', isbnMatch[0]);
+          setLastScanned(isbnMatch[0]);
+          onScan(isbnMatch[0]);
+          handleClose();
+        }
+      }
+    } catch (err) {
+      if (!(err instanceof NotFoundException)) {
+        console.error('[BarcodeScanner] Barcode error:', err);
+      }
+    }
+  };
+
+  const tryOCRDetection = async (canvas: HTMLCanvasElement, context: CanvasRenderingContext2D) => {
+    try {
+      if (!ocrWorkerRef.current) return;
       
       const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
       const data = imageData.data;
@@ -100,40 +154,21 @@ export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps)
       
       context.putImageData(imageData, 0, 0);
       
-      setScanStatus('Reading ISBN text...');
-      console.log('[BarcodeScanner] Starting OCR...');
-      
-      const worker = await createWorker('eng', 1, {
-        logger: () => {}
-      });
-      
-      await worker.setParameters({
-        tessedit_char_whitelist: 'ISBN0123456789-X ',
-      });
-      
-      const { data: { text } } = await worker.recognize(canvas);
-      await worker.terminate();
-      
-      console.log('[BarcodeScanner] OCR result:', text);
+      const { data: { text } } = await ocrWorkerRef.current.recognize(canvas);
       
       const isbnMatch = text.match(/ISBN[\s:-]*(\d[\d\s-]{9,16}\d|\d{9}[\dX])/i);
       
       if (isbnMatch) {
         const cleanIsbn = isbnMatch[1].replace(/[^0-9X]/gi, '');
-        if (cleanIsbn.length >= 10 && cleanIsbn.length <= 13) {
-          console.log('[BarcodeScanner] Valid ISBN found via OCR:', cleanIsbn);
+        if (cleanIsbn.length >= 10 && cleanIsbn.length <= 13 && cleanIsbn !== lastScanned) {
+          console.log('[BarcodeScanner] OCR detected:', cleanIsbn);
+          setLastScanned(cleanIsbn);
           onScan(cleanIsbn);
           handleClose();
-          return;
         }
       }
-      
-      setScanStatus('No ISBN found. Try again with better lighting or closer view.');
-      setIsProcessingOCR(false);
-    } catch (err: any) {
+    } catch (err) {
       console.error('[BarcodeScanner] OCR error:', err);
-      setScanStatus('OCR failed. Try again.');
-      setIsProcessingOCR(false);
     }
   };
 
@@ -150,6 +185,14 @@ export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps)
 
   const handleClose = () => {
     console.log('[BarcodeScanner] Closing scanner');
+    
+    if (scanIntervalRef.current) {
+      clearInterval(scanIntervalRef.current);
+    }
+    
+    if (ocrWorkerRef.current) {
+      ocrWorkerRef.current.terminate();
+    }
     
     if (videoRef.current && videoRef.current.srcObject) {
       const stream = videoRef.current.srcObject as MediaStream;
@@ -203,17 +246,10 @@ export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps)
                 <div className={`text-sm font-medium mb-3 ${isScanning ? 'text-green-600' : 'text-gray-600'}`}>
                   {scanStatus}
                 </div>
+                <p className="text-xs text-gray-500">
+                  Scanning automatically with barcode + OCR detection
+                </p>
               </div>
-              
-              <button
-                type="button"
-                onClick={captureAndProcessOCR}
-                disabled={isProcessingOCR}
-                style={{ display: 'block', width: '100%' }}
-                className="px-6 py-3 bg-purple-600 text-white font-medium rounded-lg active:bg-purple-800 disabled:bg-gray-400 disabled:cursor-not-allowed"
-              >
-                {isProcessingOCR ? 'Reading ISBN Text...' : '📷 Capture & Read ISBN Text'}
-              </button>
               
               <div className="relative">
                 <div className="absolute inset-0 flex items-center">
