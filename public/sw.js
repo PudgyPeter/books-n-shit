@@ -1,4 +1,4 @@
-const CACHE_NAME = 'book-catalog-v1';
+const CACHE_NAME = 'book-catalog-v2';
 const urlsToCache = [
   '/',
   '/manifest.json',
@@ -15,6 +15,12 @@ self.addEventListener('install', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
+  // Never cache API requests
+  if (event.request.url.includes('/api/')) {
+    event.respondWith(fetch(event.request));
+    return;
+  }
+
   event.respondWith(
     caches.match(event.request).then((response) => {
       if (response) {
