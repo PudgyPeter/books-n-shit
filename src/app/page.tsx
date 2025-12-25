@@ -23,7 +23,12 @@ export default function Home() {
     try {
       setLoading(true);
       setError(null);
-      const response = await fetch('/api/books');
+      const response = await fetch('/api/books', {
+        cache: 'no-store',
+        headers: {
+          'Cache-Control': 'no-cache'
+        }
+      });
       if (!response.ok) throw new Error('Failed to fetch books');
       const data = await response.json();
       setBooks(data);

@@ -32,7 +32,13 @@ async function writeBooks(books: Book[]): Promise<void> {
 export async function GET() {
   try {
     const books = await readBooks();
-    return NextResponse.json(books);
+    return NextResponse.json(books, {
+      headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
+        'Pragma': 'no-cache',
+        'Expires': '0'
+      }
+    });
   } catch (error) {
     console.error('Error reading books:', error);
     return NextResponse.json({ error: 'Failed to read books' }, { status: 500 });
@@ -45,7 +51,12 @@ export async function POST(request: NextRequest) {
     const books = await readBooks();
     books.unshift(newBook);
     await writeBooks(books);
-    return NextResponse.json(newBook, { status: 201 });
+    return NextResponse.json(newBook, { 
+      status: 201,
+      headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0'
+      }
+    });
   } catch (error) {
     console.error('Error adding book:', error);
     return NextResponse.json({ error: 'Failed to add book' }, { status: 500 });
@@ -69,7 +80,11 @@ export async function DELETE(request: NextRequest) {
     }
 
     await writeBooks(filteredBooks);
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true }, {
+      headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0'
+      }
+    });
   } catch (error) {
     console.error('Error deleting book:', error);
     return NextResponse.json({ error: 'Failed to delete book' }, { status: 500 });
