@@ -6,7 +6,7 @@ const DATA_DIR = process.env.DATA_PATH || path.join(process.cwd(), 'data');
 const BOOKS_FILE = path.join(DATA_DIR, 'books.json');
 
 export async function GET() {
-  const debugInfo = {
+  const debugInfo: any = {
     dataDir: DATA_DIR,
     booksFile: BOOKS_FILE,
     envDataPath: process.env.DATA_PATH,
@@ -45,6 +45,43 @@ export async function GET() {
       try {
         const files = await fs.readdir(DATA_DIR);
         debugInfo.directoryFiles = files;
+        
+        // Get detailed file info
+        debugInfo.fileDetails = [];
+        for (const file of files) {
+          try {
+            const filePath = path.join(DATA_DIR, file);
+            const stats = await fs.stat(filePath);
+            debugInfo.fileDetails.push({
+              name: file,
+              size: stats.size,
+              isFile: stats.isFile(),
+              modified: stats.mtime
+            });
+          } catch (fileErr) {
+            debugInfo.fileDetails.push({
+              name: file,
+              error: fileErr instanceof Error ? fileErr.message : 'Unknown error'
+            });
+          }
+        }
+        
+        // Try to read any JSON files found
+        for (const file of files) {
+          if (file.endsWith('.json')) {
+            try {
+              const filePath = path.join(DATA_DIR, file);
+              const content = await fs.readFile(filePath, 'utf-8');
+              if (file === 'books.json') {
+                debugInfo.fileContent = content;
+              } else {
+                debugInfo[file] = content;
+              }
+            } catch (readErr) {
+              debugInfo[file + '_error'] = readErr instanceof Error ? readErr.message : 'Unknown error';
+            }
+          }
+        }
       } catch (err) {
         debugInfo.directoryError = err instanceof Error ? err.message : 'Unknown error';
       }
