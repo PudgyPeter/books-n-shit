@@ -91,6 +91,32 @@ export async function GET() {
     results.mountedVolumes = [{ error: 'Cannot read mount info' }];
   }
 
+  // Deep scan: find any large JSON files or books.json anywhere on the container
+  const foundFiles: any[] = [];
+  async function scanDir(dir: string, depth: number) {
+    if (depth > 4) return;
+    const skipDirs = ['/proc', '/sys', '/dev', '/run', '/snap', '/app/node_modules', '/app/.next'];
+    if (skipDirs.some(s => dir.startsWith(s))) return;
+    try {
+      const entries = await fs.readdir(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          await scanDir(fullPath, depth + 1);
+        } else if (entry.isFile()) {
+          try {
+            const stat = await fs.stat(fullPath);
+            if (entry.name.includes('books') || entry.name.endsWith('.json') && stat.size > 1000) {
+              foundFiles.push({ path: fullPath, size: stat.size, modified: stat.mtime });
+            }
+          } catch { }
+        }
+      }
+    } catch { }
+  }
+  await scanDir('/', 0);
+  results.foundFiles = foundFiles;
+
   // Check environment variables
   results.envVars = {
     DATA_PATH: process.env.DATA_PATH,
