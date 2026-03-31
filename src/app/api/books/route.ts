@@ -17,16 +17,41 @@ async function ensureDataDir() {
 async function readBooks(): Promise<Book[]> {
   try {
     await ensureDataDir();
+    console.log(`Reading books from: ${BOOKS_FILE}`);
     const data = await fs.readFile(BOOKS_FILE, 'utf-8');
-    return JSON.parse(data);
+    const books = JSON.parse(data);
+    console.log(`Successfully read ${books.length} books`);
+    return books;
   } catch (error) {
+    console.error('Error reading books:', error);
+    console.log(`Data directory: ${DATA_DIR}`);
+    console.log(`Books file path: ${BOOKS_FILE}`);
+    
+    // Try to check if volume exists but file is missing
+    try {
+      await fs.access(DATA_DIR);
+      console.log('Data directory exists but books file is missing');
+      
+      // Check for backup files or other data
+      try {
+        const files = await fs.readdir(DATA_DIR);
+        console.log('Files in data directory:', files);
+      } catch (dirError) {
+        console.error('Cannot list data directory:', dirError);
+      }
+    } catch {
+      console.log('Data directory does not exist');
+    }
+    
     return [];
   }
 }
 
 async function writeBooks(books: Book[]): Promise<void> {
   await ensureDataDir();
+  console.log(`Writing ${books.length} books to: ${BOOKS_FILE}`);
   await fs.writeFile(BOOKS_FILE, JSON.stringify(books, null, 2), 'utf-8');
+  console.log('Successfully wrote books file');
 }
 
 export async function GET() {
