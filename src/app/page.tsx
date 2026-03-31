@@ -1,11 +1,29 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { Book, BookFormData } from '@/types/book';
 import BookForm from '@/components/BookForm';
 import BookList from '@/components/BookList';
 import SearchBar from '@/components/SearchBar';
-import { BookOpenIcon } from '@heroicons/react/24/outline';
+import { BookOpenIcon, ArrowDownTrayIcon, ArrowUpTrayIcon } from '@heroicons/react/24/outline';
+
+const LS_KEY = 'book-catalog-backup';
+
+function saveToLocalStorage(books: Book[]) {
+  try {
+    localStorage.setItem(LS_KEY, JSON.stringify({ books, savedAt: new Date().toISOString() }));
+  } catch {}
+}
+
+function loadFromLocalStorage(): { books: Book[]; savedAt: string } | null {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
 
 export default function Home() {
   const [books, setBooks] = useState<Book[]>([]);
@@ -13,6 +31,8 @@ export default function Home() {
   const [searchBy, setSearchBy] = useState<'all' | 'title' | 'author'>('all');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [restorePrompt, setRestorePrompt] = useState<{ books: Book[]; savedAt: string } | null>(null);
+  const importRef = useRef<HTMLInputElement>(null);
 
   // Load books from API on mount
   useEffect(() => {
@@ -31,7 +51,17 @@ export default function Home() {
       });
       if (!response.ok) throw new Error('Failed to fetch books');
       const data = await response.json();
-      setBooks(data);
+      if (data.length > 0) {
+        saveToLocalStorage(data);
+        setBooks(data);
+      } else {
+        // Server returned empty - check if we have a local backup
+        const local = loadFromLocalStorage();
+        if (local && local.books.length > 0) {
+          setRestorePrompt(local);
+        }
+        setBooks(data);
+      }
     } catch (err) {
       setError('Failed to load books. Please try again.');
       console.error('Error fetching books:', err);
@@ -109,6 +139,54 @@ export default function Home() {
     }
   };
 
+  const handleRestoreFromLocal = async (books: Book[]) => {
+    setRestorePrompt(null);
+    try {
+      const response = await fetch('/api/recover', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ books }),
+      });
+      if (!response.ok) throw new Error('Restore failed');
+      await fetchBooks();
+    } catch (err) {
+      setError('Failed to restore from local backup.');
+      console.error(err);
+    }
+  };
+
+  const handleExport = () => {
+    const dataStr = JSON.stringify(books, null, 2);
+    const blob = new Blob([dataStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `book-catalog-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const imported: Book[] = JSON.parse(text);
+      if (!Array.isArray(imported)) throw new Error('Invalid format');
+      const response = await fetch('/api/recover', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ books: imported }),
+      });
+      if (!response.ok) throw new Error('Import failed');
+      await fetchBooks();
+    } catch (err) {
+      setError('Failed to import. Make sure the file is a valid book catalog JSON.');
+      console.error(err);
+    }
+    e.target.value = '';
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 flex items-center justify-center">
@@ -132,7 +210,47 @@ export default function Home() {
           <p className="text-lg text-gray-600">
             Keep track of your personal book collection
           </p>
+          <div className="flex items-center justify-center gap-3 mt-4">
+            <button
+              onClick={handleExport}
+              disabled={books.length === 0}
+              className="flex items-center gap-2 bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-40 text-gray-700 px-4 py-2 rounded-lg text-sm font-medium shadow-sm"
+            >
+              <ArrowDownTrayIcon className="w-4 h-4" />
+              Export backup
+            </button>
+            <button
+              onClick={() => importRef.current?.click()}
+              className="flex items-center gap-2 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-4 py-2 rounded-lg text-sm font-medium shadow-sm"
+            >
+              <ArrowUpTrayIcon className="w-4 h-4" />
+              Import backup
+            </button>
+            <input ref={importRef} type="file" accept=".json" className="hidden" onChange={handleImport} />
+          </div>
         </div>
+
+        {/* Restore from local backup prompt */}
+        {restorePrompt && (
+          <div className="bg-amber-50 border border-amber-300 text-amber-900 px-4 py-4 rounded-lg mb-6">
+            <p className="font-semibold mb-1">⚠️ Server catalogue is empty, but a local backup was found!</p>
+            <p className="text-sm mb-3">Local backup from {new Date(restorePrompt.savedAt).toLocaleString()} contains <strong>{restorePrompt.books.length} books</strong>.</p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => handleRestoreFromLocal(restorePrompt.books)}
+                className="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-lg text-sm font-medium"
+              >
+                Restore {restorePrompt.books.length} books to server
+              </button>
+              <button
+                onClick={() => setRestorePrompt(null)}
+                className="bg-white border border-amber-300 text-amber-800 px-4 py-2 rounded-lg text-sm"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Error Message */}
         {error && (
