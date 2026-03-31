@@ -1,128 +1,45 @@
 import { NextResponse } from 'next/server';
 import { promises as fs } from 'fs';
 import path from 'path';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+
+const execAsync = promisify(exec);
+
+async function run(cmd: string): Promise<string> {
+  try {
+    const { stdout, stderr } = await execAsync(cmd, { timeout: 8000 });
+    return stdout || stderr || '(no output)';
+  } catch (e: any) {
+    return e?.message || 'error';
+  }
+}
 
 export async function GET() {
-  const results: any = {
-    checks: [],
-    possiblePaths: [],
-    mountedVolumes: [],
-    systemInfo: {
-      cwd: process.cwd(),
-      nodeVersion: process.version,
-      platform: process.platform
-    }
-  };
+  const results: any = {};
 
-  // Check various possible data locations
-  const pathsToCheck = [
-    '/data',
-    '/app/data', 
-    '/app/.data',
-    '/tmp/data',
-    '/var/data',
-    path.join(process.cwd(), 'data'),
-    path.join(process.cwd(), '.data'),
-    '/volume/data',
-    '/mnt/data'
-  ];
+  // Full raw mount table
+  results.procMounts = await run('cat /proc/mounts');
 
-  for (const checkPath of pathsToCheck) {
-    try {
-      const stats = await fs.stat(checkPath);
-      const exists = true;
-      let files: string[] = [];
-      let size = 0;
-      
-      if (stats.isDirectory()) {
-        try {
-          files = await fs.readdir(checkPath);
-          
-          // Calculate total size
-          for (const file of files) {
-            try {
-              const filePath = path.join(checkPath, file);
-              const fileStats = await fs.stat(filePath);
-              if (fileStats.isFile()) {
-                size += fileStats.size;
-              }
-            } catch {
-              // Skip files we can't stat
-            }
-          }
-        } catch (dirErr) {
-          // Can't read directory
-        }
-      }
+  // df to see actual disk usage per mount point
+  results.df = await run('df -h');
 
-      results.possiblePaths.push({
-        path: checkPath,
-        exists: true,
-        isDirectory: stats.isDirectory(),
-        size: stats.size,
-        fileCount: files.length,
-        files: files.slice(0, 10), // Limit to first 10 files
-        totalSize: size,
-        modified: stats.mtime
-      });
-    } catch (err) {
-      results.possiblePaths.push({
-        path: checkPath,
-        exists: false,
-        error: err instanceof Error ? err.message : 'Unknown error'
-      });
-    }
-  }
+  // List /data with hidden files using shell
+  results.lsData = await run('ls -la /data/');
+  results.lsDataAll = await run('ls -laR /data/');
 
-  // Try to check mount points (Linux/Unix style)
-  try {
-    const mounts = await fs.readFile('/proc/mounts', 'utf-8');
-    const mountLines = mounts.split('\n').filter(line => line.trim());
-    results.mountedVolumes = mountLines.map(line => {
-      const parts = line.split(' ');
-      return {
-        device: parts[0] || '',
-        mountPoint: parts[1] || '',
-        fsType: parts[2] || '',
-        options: parts[3] || ''
-      };
-    }).filter(mount => mount.mountPoint.includes('/data') || mount.mountPoint.includes('/volume'));
-  } catch (mountErr) {
-    results.mountedVolumes = [{ error: 'Cannot read mount info' }];
-  }
+  // Find ALL files in /data regardless of how hidden
+  results.findData = await run('find /data -maxdepth 5 -ls 2>&1 | head -100');
 
-  // Deep scan: find any large JSON files or books.json anywhere on the container
-  const foundFiles: any[] = [];
-  async function scanDir(dir: string, depth: number) {
-    if (depth > 4) return;
-    const skipDirs = ['/proc', '/sys', '/dev', '/run', '/snap', '/app/node_modules', '/app/.next'];
-    if (skipDirs.some(s => dir.startsWith(s))) return;
-    try {
-      const entries = await fs.readdir(dir, { withFileTypes: true });
-      for (const entry of entries) {
-        const fullPath = path.join(dir, entry.name);
-        if (entry.isDirectory()) {
-          await scanDir(fullPath, depth + 1);
-        } else if (entry.isFile()) {
-          try {
-            const stat = await fs.stat(fullPath);
-            if (entry.name.includes('books') || entry.name.endsWith('.json') && stat.size > 1000) {
-              foundFiles.push({ path: fullPath, size: stat.size, modified: stat.mtime });
-            }
-          } catch { }
-        }
-      }
-    } catch { }
-  }
-  await scanDir('/', 0);
-  results.foundFiles = foundFiles;
+  // Find any json file anywhere on disk > 10KB
+  results.findJson = await run('find / -name "*.json" -size +10k -not -path "*/node_modules/*" -not -path "*/.next/*" -not -path "/proc/*" -not -path "/sys/*" 2>/dev/null | head -30');
 
-  // Check environment variables
-  results.envVars = {
-    DATA_PATH: process.env.DATA_PATH,
-    HOME: process.env.HOME,
-    PWD: process.env.PWD
-  };
+  // Find anything named books
+  results.findBooks = await run('find / -name "*books*" -not -path "*/node_modules/*" -not -path "*/.next/*" -not -path "/proc/*" -not -path "/sys/*" 2>/dev/null | head -30');
+
+  // Check inode usage on /data mount to see if data exists but is unlinked
+  results.statData = await run('stat /data');
+  results.duData = await run('du -sh /data/ 2>&1');
 
   return NextResponse.json(results);
 }
