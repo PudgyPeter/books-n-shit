@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { Book, BookFormData } from '@/types/book';
 import BookForm from '@/components/BookForm';
 import BookList from '@/components/BookList';
-import { PlusIcon, MagnifyingGlassIcon, XMarkIcon, CloudArrowUpIcon, CloudArrowDownIcon, ArrowDownTrayIcon, ArrowUpTrayIcon } from '@heroicons/react/24/outline';
+import { PlusIcon, MagnifyingGlassIcon, XMarkIcon, CloudArrowUpIcon, CloudArrowDownIcon, ArrowDownTrayIcon, ArrowUpTrayIcon, TrashIcon } from '@heroicons/react/24/outline';
 
 const LS_KEY = 'book-catalog-backup';
 
@@ -215,6 +215,22 @@ export default function Home() {
     }
   };
 
+  const handleClearCache = async () => {
+    setShowMenu(false);
+    try {
+      if ('serviceWorker' in navigator) {
+        const keys = await caches.keys();
+        await Promise.all(keys.map(k => caches.delete(k)));
+        const registrations = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(registrations.map(r => r.unregister()));
+      }
+      setToast({ msg: 'Cache cleared — reloading...', type: 'success' });
+      setTimeout(() => window.location.reload(), 800);
+    } catch {
+      setToast({ msg: 'Failed to clear cache', type: 'error' });
+    }
+  };
+
   const handleGistRestore = async () => {
     setGistStatus('Restoring...');
     setShowMenu(false);
@@ -300,6 +316,11 @@ export default function Home() {
                   Import JSON
                 </button>
                 <input ref={importRef} type="file" accept=".json" className="hidden" onChange={handleImport} />
+                <div className="border-t border-zinc-100 my-1" />
+                <button onClick={handleClearCache} className="w-full flex items-center gap-3 px-4 py-3 text-sm text-red-500 hover:bg-red-50 active:bg-red-100">
+                  <TrashIcon className="w-4 h-4" />
+                  Clear Cache &amp; Reload
+                </button>
               </div>
             )}
           </div>
