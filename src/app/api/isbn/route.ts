@@ -150,6 +150,32 @@ async function fetchFromWorldCat(isbn: string): Promise<BookResult | null> {
   }
 }
 
+async function fetchFromGoogleBooksLoose(isbn: string): Promise<BookResult | null> {
+  // Last resort: search ISBN as plain text, no isbn: prefix and no identifier verification
+  // Catches regional editions (e.g. Australian prints) present in Google Books but not indexed by exact ISBN
+  try {
+    const response = await withTimeout(
+      fetch(`https://www.googleapis.com/books/v1/volumes?q=${isbn}&maxResults=3`, { cache: 'no-store' }),
+      5000
+    );
+    if (!response.ok) return null;
+    const data = await response.json();
+    if (!data.items?.length) return null;
+    // Take the first result that has both a title and author
+    for (const item of data.items) {
+      const info = item.volumeInfo;
+      const title = info.title || '';
+      const author = info.authors?.join(', ') || '';
+      if (title && author) {
+        return { title, author, isbn, source: 'Google Books' };
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 async function tryAllSources(isbn: string): Promise<BookResult | null> {
   // Run all sources simultaneously, return first non-null result
   const results = await Promise.allSettled([
@@ -158,6 +184,7 @@ async function tryAllSources(isbn: string): Promise<BookResult | null> {
     fetchFromGoogleBooks(isbn),
     fetchFromGoogleBooksTitle(isbn),
     fetchFromWorldCat(isbn),
+    fetchFromGoogleBooksLoose(isbn),
   ]);
 
   for (const result of results) {
