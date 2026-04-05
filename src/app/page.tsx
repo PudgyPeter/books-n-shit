@@ -7,7 +7,7 @@ import BookList from '@/components/BookList';
 import SearchBar from '@/components/SearchBar';
 import { BookOpenIcon, ArrowDownTrayIcon, ArrowUpTrayIcon } from '@heroicons/react/24/outline';
 
-const LS_KEY = 'book-catalog-backup';
+const LS_KEY = 'book-catalog-backup'; // Trigger deployment update - April 2026
 
 function saveToLocalStorage(books: Book[]) {
   try {
