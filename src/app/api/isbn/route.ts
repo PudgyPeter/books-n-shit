@@ -79,39 +79,84 @@ async function fetchFromGoogleBooks(isbn: string): Promise<BookResult | null> {
   }
 }
 
+async function fetchFromGoogleBooksTitle(isbn: string): Promise<BookResult | null> {
+  // Try Google Books with a broader query in case isbn: prefix misses it
+  try {
+    const response = await withTimeout(
+      fetch(`https://www.googleapis.com/books/v1/volumes?q=${isbn}&maxResults=1`, { cache: 'no-store' }),
+      5000
+    );
+    if (!response.ok) return null;
+    const data = await response.json();
+    if (!data.items?.length) return null;
+    const info = data.items[0].volumeInfo;
+    // Verify the result actually matches the ISBN
+    const industryIds: any[] = info.industryIdentifiers || [];
+    const isbnMatch = industryIds.some((id: any) => id.identifier?.replace(/-/g, '') === isbn);
+    if (!isbnMatch && industryIds.length > 0) return null;
+    const author = info.authors?.join(', ') || '';
+    if (!info.title) return null;
+    return { title: info.title, author, isbn, source: 'Google Books' };
+  } catch {
+    return null;
+  }
+}
+
+async function fetchFromOpenLibrarySearch(isbn: string): Promise<BookResult | null> {
+  try {
+    const response = await withTimeout(
+      fetch(`https://openlibrary.org/search.json?isbn=${isbn}&limit=1`, { cache: 'no-store' }),
+      5000
+    );
+    if (!response.ok) return null;
+    const data = await response.json();
+    if (!data.docs?.length) return null;
+    const doc = data.docs[0];
+    const title = doc.title || '';
+    const author = doc.author_name?.join(', ') || '';
+    if (!title) return null;
+    return { title, author, isbn, source: 'Open Library Search' };
+  } catch {
+    return null;
+  }
+}
+
 async function fetchFromWorldCat(isbn: string): Promise<BookResult | null> {
   try {
     const response = await withTimeout(
       fetch(`https://www.worldcat.org/isbn/${isbn}`, {
         cache: 'no-store',
-        headers: { 'Accept': 'application/json' }
+        headers: { 'Accept': 'text/html,application/xhtml+xml' }
       }),
-      5000
+      6000
     );
     if (!response.ok) return null;
 
-    // WorldCat returns HTML - parse the JSON-LD embedded in the page
     const html = await response.text();
+    // Try JSON-LD first
     const jsonLdMatch = html.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/);
-    if (!jsonLdMatch) return null;
-    const jsonLd = JSON.parse(jsonLdMatch[1]);
-    const title = jsonLd.name || jsonLd.title || '';
-    const authorRaw = jsonLd.author;
-    const author = Array.isArray(authorRaw)
-      ? authorRaw.map((a: any) => a.name || a).join(', ')
-      : (authorRaw?.name || authorRaw || '');
-    if (!title && !author) return null;
-    return { title, author, isbn, source: 'WorldCat' };
+    if (jsonLdMatch) {
+      const jsonLd = JSON.parse(jsonLdMatch[1]);
+      const title = jsonLd.name || jsonLd.title || '';
+      const authorRaw = jsonLd.author;
+      const author = Array.isArray(authorRaw)
+        ? authorRaw.map((a: any) => a.name || a).join(', ')
+        : (authorRaw?.name || authorRaw || '');
+      if (title) return { title, author, isbn, source: 'WorldCat' };
+    }
+    return null;
   } catch {
     return null;
   }
 }
 
 async function tryAllSources(isbn: string): Promise<BookResult | null> {
-  // Race all three sources simultaneously, return first non-null result
+  // Run all sources simultaneously, return first non-null result
   const results = await Promise.allSettled([
     fetchFromOpenLibrary(isbn),
+    fetchFromOpenLibrarySearch(isbn),
     fetchFromGoogleBooks(isbn),
+    fetchFromGoogleBooksTitle(isbn),
     fetchFromWorldCat(isbn),
   ]);
 
