@@ -8,75 +8,68 @@ interface BookListProps {
   onDelete: (id: string) => void;
 }
 
+const gradients = [
+  'from-blue-500 to-indigo-600',
+  'from-purple-500 to-pink-600',
+  'from-emerald-500 to-teal-600',
+  'from-orange-500 to-red-500',
+  'from-cyan-500 to-blue-600',
+  'from-rose-500 to-pink-600',
+  'from-amber-500 to-orange-600',
+  'from-violet-500 to-purple-600',
+];
+
+function getGradient(id: string) {
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) hash = id.charCodeAt(i) + ((hash << 5) - hash);
+  return gradients[Math.abs(hash) % gradients.length];
+}
+
 export default function BookList({ books, onDelete }: BookListProps) {
   if (books.length === 0) {
     return (
-      <div className="bg-white rounded-xl shadow-lg p-12 text-center">
-        <p className="text-gray-500 text-lg">No books in your catalog yet. Add your first book above!</p>
+      <div className="text-center mt-16 text-zinc-400 px-4">
+        <p className="text-4xl mb-3">📚</p>
+        <p className="text-base font-medium text-zinc-500">No books yet</p>
+        <p className="text-sm mt-1">Tap + to add your first book</p>
       </div>
     );
   }
 
   return (
-    <div className="bg-white rounded-xl shadow-lg overflow-hidden">
-      <div className="overflow-x-auto">
-        <table className="w-full">
-          <thead className="bg-gray-50 border-b border-gray-200">
-            <tr>
-              <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
-                Title
-              </th>
-              <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
-                Author
-              </th>
-              <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
-                ISBN
-              </th>
-              <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
-                Cover Style
-              </th>
-              <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
-                Date Added
-              </th>
-              <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
-                Actions
-              </th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-200">
-            {books.map((book) => (
-              <tr key={book.id} className="hover:bg-gray-50 transition-colors">
-                <td className="px-6 py-4 text-sm font-medium text-gray-900">
-                  {book.title}
-                </td>
-                <td className="px-6 py-4 text-sm text-gray-700">
-                  {book.author}
-                </td>
-                <td className="px-6 py-4 text-sm text-gray-600">
-                  {book.isbn || <span className="text-gray-400 italic">N/A</span>}
-                </td>
-                <td className="px-6 py-4 text-sm text-gray-700">
-                  <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                    {book.coverStyle}
-                  </span>
-                </td>
-                <td className="px-6 py-4 text-sm text-gray-500">
-                  {new Date(book.dateAdded).toLocaleDateString()}
-                </td>
-                <td className="px-6 py-4 text-sm">
-                  <button
-                    onClick={() => onDelete(book.id)}
-                    className="text-red-600 hover:text-red-800 transition-colors p-2 hover:bg-red-50 rounded-lg"
-                    title="Delete book"
-                  >
-                    <TrashIcon className="w-5 h-5" />
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+      {books.map((book) => (
+        <div
+          key={book.id}
+          className="bg-white rounded-2xl shadow-sm overflow-hidden active:scale-[0.98] transition-transform"
+        >
+          {/* Cover */}
+          <div className={`h-28 bg-gradient-to-br ${getGradient(book.id)} flex items-center justify-center`}>
+            <span className="text-white text-3xl font-bold drop-shadow">
+              {book.title[0]?.toUpperCase() ?? '?'}
+            </span>
+          </div>
+
+          {/* Info */}
+          <div className="p-3">
+            <h2 className="font-semibold text-sm leading-tight line-clamp-2 text-zinc-900">{book.title}</h2>
+            <p className="text-xs text-zinc-500 truncate mt-0.5">{book.author}</p>
+
+            <div className="mt-2 flex items-center justify-between gap-1">
+              <span className="text-[10px] bg-zinc-100 text-zinc-600 px-2 py-0.5 rounded-full truncate max-w-[80px]">
+                {book.coverStyle}
+              </span>
+              <button
+                onClick={() => onDelete(book.id)}
+                className="text-red-400 hover:text-red-600 active:scale-90 transition p-1 rounded-lg hover:bg-red-50"
+                title="Delete book"
+              >
+                <TrashIcon className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

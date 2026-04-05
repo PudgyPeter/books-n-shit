@@ -4,3 +4,8 @@
 # Path where the Railway volume is mounted
 # This should match your volume mount path in Railway dashboard
 DATA_PATH=/data
+
+# GitHub Personal Access Token for Gist cloud backups
+# Create at: https://github.com/settings/tokens
+# Required scopes: gist
+GITHUB_TOKEN=your_github_token_here

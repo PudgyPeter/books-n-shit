@@ -4,10 +4,9 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { Book, BookFormData } from '@/types/book';
 import BookForm from '@/components/BookForm';
 import BookList from '@/components/BookList';
-import SearchBar from '@/components/SearchBar';
-import { BookOpenIcon, ArrowDownTrayIcon, ArrowUpTrayIcon } from '@heroicons/react/24/outline';
+import { PlusIcon, MagnifyingGlassIcon, XMarkIcon, CloudArrowUpIcon, CloudArrowDownIcon, ArrowDownTrayIcon, ArrowUpTrayIcon } from '@heroicons/react/24/outline';
 
-const LS_KEY = 'book-catalog-backup'; // Trigger deployment update - April 2026
+const LS_KEY = 'book-catalog-backup';
 
 function saveToLocalStorage(books: Book[]) {
   try {
@@ -31,12 +30,32 @@ export default function Home() {
   const [searchBy, setSearchBy] = useState<'all' | 'title' | 'author'>('all');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
   const [restorePrompt, setRestorePrompt] = useState<{ books: Book[]; savedAt: string } | null>(null);
+  const [showModal, setShowModal] = useState(false);
+  const [showMenu, setShowMenu] = useState(false);
+  const [gistStatus, setGistStatus] = useState<string | null>(null);
   const importRef = useRef<HTMLInputElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
-  // Load books from API on mount
   useEffect(() => {
     fetchBooks();
+  }, []);
+
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 3000);
+    return () => clearTimeout(t);
+  }, [toast]);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setShowMenu(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
   const fetchBooks = async () => {
@@ -45,9 +64,7 @@ export default function Home() {
       setError(null);
       const response = await fetch('/api/books', {
         cache: 'no-store',
-        headers: {
-          'Cache-Control': 'no-cache'
-        }
+        headers: { 'Cache-Control': 'no-cache' }
       });
       if (!response.ok) throw new Error('Failed to fetch books');
       const data = await response.json();
@@ -55,7 +72,6 @@ export default function Home() {
         saveToLocalStorage(data);
         setBooks(data);
       } else {
-        // Server returned empty - check if we have a local backup
         const local = loadFromLocalStorage();
         if (local && local.books.length > 0) {
           setRestorePrompt(local);
@@ -70,25 +86,18 @@ export default function Home() {
     }
   };
 
-  // Get unique authors for autocomplete
   const uniqueAuthors = useMemo(() => {
     const authors = books.map((book) => book.author);
     return Array.from(new Set(authors)).sort();
   }, [books]);
 
-  // Filter books based on search
   const filteredBooks = useMemo(() => {
     if (!searchTerm) return books;
-
     const lowerSearchTerm = searchTerm.toLowerCase();
-    
     return books.filter((book) => {
       switch (searchBy) {
-        case 'title':
-          return book.title.toLowerCase().includes(lowerSearchTerm);
-        case 'author':
-          return book.author.toLowerCase().includes(lowerSearchTerm);
-        case 'all':
+        case 'title': return book.title.toLowerCase().includes(lowerSearchTerm);
+        case 'author': return book.author.toLowerCase().includes(lowerSearchTerm);
         default:
           return (
             book.title.toLowerCase().includes(lowerSearchTerm) ||
@@ -106,16 +115,15 @@ export default function Home() {
         ...data,
         dateAdded: new Date().toISOString(),
       };
-      
       const response = await fetch('/api/books', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newBook),
       });
-      
       if (!response.ok) throw new Error('Failed to add book');
-      
+      setShowModal(false);
       await fetchBooks();
+      setToast({ msg: 'Book added!', type: 'success' });
     } catch (err) {
       setError('Failed to add book. Please try again.');
       console.error('Error adding book:', err);
@@ -125,13 +133,10 @@ export default function Home() {
   const handleDeleteBook = async (id: string) => {
     if (confirm('Are you sure you want to delete this book?')) {
       try {
-        const response = await fetch(`/api/books?id=${id}`, {
-          method: 'DELETE',
-        });
-        
+        const response = await fetch(`/api/books?id=${id}`, { method: 'DELETE' });
         if (!response.ok) throw new Error('Failed to delete book');
-        
         await fetchBooks();
+        setToast({ msg: 'Book deleted.', type: 'success' });
       } catch (err) {
         setError('Failed to delete book. Please try again.');
         console.error('Error deleting book:', err);
@@ -139,16 +144,17 @@ export default function Home() {
     }
   };
 
-  const handleRestoreFromLocal = async (books: Book[]) => {
+  const handleRestoreFromLocal = async (booksToRestore: Book[]) => {
     setRestorePrompt(null);
     try {
       const response = await fetch('/api/recover', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ books }),
+        body: JSON.stringify({ books: booksToRestore }),
       });
       if (!response.ok) throw new Error('Restore failed');
       await fetchBooks();
+      setToast({ msg: 'Restored from local backup!', type: 'success' });
     } catch (err) {
       setError('Failed to restore from local backup.');
       console.error(err);
@@ -164,6 +170,7 @@ export default function Home() {
     a.download = `book-catalog-${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
     URL.revokeObjectURL(url);
+    setShowMenu(false);
   };
 
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -180,115 +187,249 @@ export default function Home() {
       });
       if (!response.ok) throw new Error('Import failed');
       await fetchBooks();
+      setToast({ msg: 'Imported successfully!', type: 'success' });
     } catch (err) {
-      setError('Failed to import. Make sure the file is a valid book catalog JSON.');
+      setToast({ msg: 'Import failed. Invalid file.', type: 'error' });
       console.error(err);
     }
     e.target.value = '';
+    setShowMenu(false);
+  };
+
+  const handleGistBackup = async () => {
+    setGistStatus('Backing up...');
+    setShowMenu(false);
+    try {
+      const response = await fetch('/api/backup/gist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ books }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Backup failed');
+      setGistStatus(null);
+      setToast({ msg: `Backed up to GitHub Gist (${books.length} books)`, type: 'success' });
+    } catch (err: any) {
+      setGistStatus(null);
+      setToast({ msg: err.message || 'GitHub backup failed', type: 'error' });
+    }
+  };
+
+  const handleGistRestore = async () => {
+    setGistStatus('Restoring...');
+    setShowMenu(false);
+    try {
+      const response = await fetch('/api/backup/gist');
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Restore failed');
+      const restoreResponse = await fetch('/api/recover', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ books: data.books }),
+      });
+      if (!restoreResponse.ok) throw new Error('Restore failed');
+      await fetchBooks();
+      setGistStatus(null);
+      setToast({ msg: `Restored ${data.books.length} books from GitHub Gist`, type: 'success' });
+    } catch (err: any) {
+      setGistStatus(null);
+      setToast({ msg: err.message || 'GitHub restore failed', type: 'error' });
+    }
   };
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 flex items-center justify-center">
+      <div className="min-h-screen bg-zinc-50 flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading your book catalog...</p>
+          <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600 mx-auto mb-3"></div>
+          <p className="text-zinc-500 text-sm">Loading catalog...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50">
-      <div className="container mx-auto px-4 py-8 max-w-7xl">
-        {/* Header */}
-        <div className="text-center mb-12">
-          <div className="flex items-center justify-center gap-3 mb-4">
-            <BookOpenIcon className="w-12 h-12 text-blue-600" />
-            <h1 className="text-5xl font-bold text-gray-900">My Book Catalog</h1>
+    <div className="min-h-screen bg-zinc-50 text-zinc-900 pb-24">
+
+      {/* Sticky Header */}
+      <div className="sticky top-0 z-20 bg-zinc-50/90 backdrop-blur border-b border-zinc-200">
+        <div className="max-w-2xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
+          <h1 className="text-base font-semibold shrink-0">📚 My Catalog</h1>
+
+          {/* Search */}
+          <div className="flex-1 flex items-center gap-2 bg-white border border-zinc-200 rounded-xl px-3 py-2 shadow-sm">
+            <MagnifyingGlassIcon className="w-4 h-4 text-zinc-400 shrink-0" />
+            <input
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Search..."
+              className="w-full outline-none bg-transparent text-sm"
+            />
+            {searchTerm && (
+              <button onClick={() => setSearchTerm('')}>
+                <XMarkIcon className="w-4 h-4 text-zinc-400" />
+              </button>
+            )}
           </div>
-          <p className="text-lg text-gray-600">
-            Keep track of your personal book collection
-          </p>
-          <div className="flex items-center justify-center gap-3 mt-4">
+
+          {/* Menu */}
+          <div className="relative shrink-0" ref={menuRef}>
             <button
-              onClick={handleExport}
-              disabled={books.length === 0}
-              className="flex items-center gap-2 bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-40 text-gray-700 px-4 py-2 rounded-lg text-sm font-medium shadow-sm"
+              onClick={() => setShowMenu((v) => !v)}
+              className="w-9 h-9 flex items-center justify-center rounded-xl bg-white border border-zinc-200 shadow-sm text-zinc-600 hover:bg-zinc-50 active:scale-95 transition"
             >
-              <ArrowDownTrayIcon className="w-4 h-4" />
-              Export backup
+              <span className="text-lg leading-none">⋮</span>
             </button>
-            <button
-              onClick={() => importRef.current?.click()}
-              className="flex items-center gap-2 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-4 py-2 rounded-lg text-sm font-medium shadow-sm"
-            >
-              <ArrowUpTrayIcon className="w-4 h-4" />
-              Import backup
-            </button>
-            <input ref={importRef} type="file" accept=".json" className="hidden" onChange={handleImport} />
+            {showMenu && (
+              <div className="absolute right-0 top-11 w-52 bg-white rounded-2xl shadow-xl border border-zinc-100 py-1 z-30">
+                <button onClick={handleGistBackup} className="w-full flex items-center gap-3 px-4 py-3 text-sm text-zinc-700 hover:bg-zinc-50 active:bg-zinc-100">
+                  <CloudArrowUpIcon className="w-4 h-4 text-blue-500" />
+                  Backup to GitHub
+                </button>
+                <button onClick={handleGistRestore} className="w-full flex items-center gap-3 px-4 py-3 text-sm text-zinc-700 hover:bg-zinc-50 active:bg-zinc-100">
+                  <CloudArrowDownIcon className="w-4 h-4 text-green-500" />
+                  Restore from GitHub
+                </button>
+                <div className="border-t border-zinc-100 my-1" />
+                <button onClick={handleExport} disabled={books.length === 0} className="w-full flex items-center gap-3 px-4 py-3 text-sm text-zinc-700 hover:bg-zinc-50 active:bg-zinc-100 disabled:opacity-40">
+                  <ArrowDownTrayIcon className="w-4 h-4 text-zinc-400" />
+                  Export JSON
+                </button>
+                <button onClick={() => { importRef.current?.click(); setShowMenu(false); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm text-zinc-700 hover:bg-zinc-50 active:bg-zinc-100">
+                  <ArrowUpTrayIcon className="w-4 h-4 text-zinc-400" />
+                  Import JSON
+                </button>
+                <input ref={importRef} type="file" accept=".json" className="hidden" onChange={handleImport} />
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Restore from local backup prompt */}
-        {restorePrompt && (
-          <div className="bg-amber-50 border border-amber-300 text-amber-900 px-4 py-4 rounded-lg mb-6">
-            <p className="font-semibold mb-1">⚠️ Server catalogue is empty, but a local backup was found!</p>
-            <p className="text-sm mb-3">Local backup from {new Date(restorePrompt.savedAt).toLocaleString()} contains <strong>{restorePrompt.books.length} books</strong>.</p>
-            <div className="flex gap-3">
+        {/* Search filter pills */}
+        <div className="max-w-2xl mx-auto px-4 pb-2 flex gap-2">
+          {(['all', 'title', 'author'] as const).map((opt) => (
+            <button
+              key={opt}
+              onClick={() => setSearchBy(opt)}
+              className={`text-xs px-3 py-1 rounded-full font-medium transition ${
+                searchBy === opt
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200'
+              }`}
+            >
+              {opt.charAt(0).toUpperCase() + opt.slice(1)}
+            </button>
+          ))}
+          {searchTerm && (
+            <span className="text-xs text-zinc-400 self-center ml-1">{filteredBooks.length} result{filteredBooks.length !== 1 ? 's' : ''}</span>
+          )}
+        </div>
+      </div>
+
+      {/* Status bar for gist ops */}
+      {gistStatus && (
+        <div className="max-w-2xl mx-auto px-4 mt-3">
+          <div className="bg-blue-50 border border-blue-200 text-blue-700 px-4 py-2 rounded-xl text-sm flex items-center gap-2">
+            <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-600"></div>
+            {gistStatus}
+          </div>
+        </div>
+      )}
+
+      {/* Restore from local backup prompt */}
+      {restorePrompt && (
+        <div className="max-w-2xl mx-auto px-4 mt-3">
+          <div className="bg-amber-50 border border-amber-300 text-amber-900 px-4 py-3 rounded-xl">
+            <p className="font-semibold text-sm mb-1">⚠️ Server is empty — local backup found</p>
+            <p className="text-xs mb-3 text-amber-700">
+              {new Date(restorePrompt.savedAt).toLocaleString()} · {restorePrompt.books.length} books
+            </p>
+            <div className="flex gap-2">
               <button
                 onClick={() => handleRestoreFromLocal(restorePrompt.books)}
-                className="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-lg text-sm font-medium"
+                className="bg-amber-600 hover:bg-amber-700 text-white px-3 py-1.5 rounded-lg text-xs font-medium"
               >
-                Restore {restorePrompt.books.length} books to server
+                Restore {restorePrompt.books.length} books
               </button>
               <button
                 onClick={() => setRestorePrompt(null)}
-                className="bg-white border border-amber-300 text-amber-800 px-4 py-2 rounded-lg text-sm"
+                className="bg-white border border-amber-300 text-amber-800 px-3 py-1.5 rounded-lg text-xs"
               >
                 Dismiss
               </button>
             </div>
           </div>
-        )}
+        </div>
+      )}
 
-        {/* Error Message */}
-        {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-6">
+      {/* Error */}
+      {error && (
+        <div className="max-w-2xl mx-auto px-4 mt-3">
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-2 rounded-xl text-sm flex justify-between items-center">
             {error}
-          </div>
-        )}
-
-        {/* Add Book Form */}
-        <BookForm onSubmit={handleAddBook} authors={uniqueAuthors} />
-
-        {/* Search Bar */}
-        <SearchBar
-          searchTerm={searchTerm}
-          onSearchChange={setSearchTerm}
-          searchBy={searchBy}
-          onSearchByChange={setSearchBy}
-        />
-
-        {/* Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-          <div className="bg-white rounded-lg shadow p-6">
-            <p className="text-sm text-gray-600 mb-1">Total Books</p>
-            <p className="text-3xl font-bold text-blue-600">{books.length}</p>
-          </div>
-          <div className="bg-white rounded-lg shadow p-6">
-            <p className="text-sm text-gray-600 mb-1">Unique Authors</p>
-            <p className="text-3xl font-bold text-purple-600">{uniqueAuthors.length}</p>
-          </div>
-          <div className="bg-white rounded-lg shadow p-6">
-            <p className="text-sm text-gray-600 mb-1">Search Results</p>
-            <p className="text-3xl font-bold text-indigo-600">{filteredBooks.length}</p>
+            <button onClick={() => setError(null)} className="ml-2 text-red-400 hover:text-red-600">
+              <XMarkIcon className="w-4 h-4" />
+            </button>
           </div>
         </div>
+      )}
 
-        {/* Book List */}
+      {/* Stats */}
+      <div className="max-w-2xl mx-auto px-4 mt-4 grid grid-cols-3 gap-2">
+        <div className="bg-white rounded-2xl p-3 shadow-sm text-center">
+          <p className="text-2xl font-bold text-blue-600">{books.length}</p>
+          <p className="text-xs text-zinc-500 mt-0.5">Books</p>
+        </div>
+        <div className="bg-white rounded-2xl p-3 shadow-sm text-center">
+          <p className="text-2xl font-bold text-purple-600">{uniqueAuthors.length}</p>
+          <p className="text-xs text-zinc-500 mt-0.5">Authors</p>
+        </div>
+        <div className="bg-white rounded-2xl p-3 shadow-sm text-center">
+          <p className="text-2xl font-bold text-indigo-600">{filteredBooks.length}</p>
+          <p className="text-xs text-zinc-500 mt-0.5">Showing</p>
+        </div>
+      </div>
+
+      {/* Book Grid */}
+      <div className="max-w-2xl mx-auto px-4 mt-4">
         <BookList books={filteredBooks} onDelete={handleDeleteBook} />
       </div>
+
+      {/* FAB */}
+      <button
+        onClick={() => setShowModal(true)}
+        className="fixed bottom-6 right-6 z-20 bg-blue-600 text-white w-14 h-14 rounded-full shadow-lg flex items-center justify-center active:scale-90 hover:bg-blue-700 transition"
+        aria-label="Add book"
+      >
+        <PlusIcon className="w-6 h-6" />
+      </button>
+
+      {/* Add Book Modal (bottom sheet on mobile) */}
+      {showModal && (
+        <div className="fixed inset-0 z-30 flex items-end sm:items-center justify-center">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setShowModal(false)} />
+          <div className="relative bg-white w-full sm:max-w-lg sm:rounded-2xl rounded-t-2xl shadow-xl z-10 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-zinc-100">
+              <h2 className="text-base font-semibold">Add Book</h2>
+              <button onClick={() => setShowModal(false)} className="text-zinc-400 hover:text-zinc-600">
+                <XMarkIcon className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="px-5 py-4">
+              <BookForm onSubmit={handleAddBook} authors={uniqueAuthors} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Toast */}
+      {toast && (
+        <div className={`fixed bottom-24 left-1/2 -translate-x-1/2 z-40 px-4 py-2 rounded-full text-sm font-medium shadow-lg transition ${
+          toast.type === 'success' ? 'bg-zinc-900 text-white' : 'bg-red-600 text-white'
+        }`}>
+          {toast.msg}
+        </div>
+      )}
     </div>
   );
 }

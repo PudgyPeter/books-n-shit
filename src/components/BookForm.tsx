@@ -93,106 +93,96 @@ export default function BookForm({ onSubmit, authors }: BookFormProps) {
   };
 
   return (
-    <form onSubmit={handleSubmit(handleFormSubmit)} className="bg-white rounded-xl shadow-lg p-8 mb-8">
-      <h2 className="text-2xl font-bold text-gray-800 mb-6">Add New Book</h2>
-      
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-        <div>
-          <label htmlFor="title" className="block text-sm font-medium text-gray-700 mb-2">
-            Book Title
-          </label>
+    <form onSubmit={handleSubmit(handleFormSubmit)} className="flex flex-col gap-3">
+      <div>
+        <label htmlFor="title" className="block text-xs font-medium text-zinc-600 mb-1">
+          Title
+        </label>
+        <input
+          id="title"
+          type="text"
+          {...register('title', { required: true })}
+          className="w-full px-3 py-3 border border-zinc-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+          placeholder="Book title"
+          required
+        />
+      </div>
+
+      <div className="relative">
+        <label htmlFor="author" className="block text-xs font-medium text-zinc-600 mb-1">
+          Author
+        </label>
+        <div className="relative">
           <input
-            id="title"
+            id="author"
             type="text"
-            {...register('title', { required: true })}
-            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-            placeholder="Enter book title"
+            {...register('author', { required: true })}
+            onKeyDown={handleKeyDown}
+            className="w-full px-3 py-3 border border-zinc-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all relative z-10 bg-transparent"
+            placeholder="Author name"
+            autoComplete="off"
             required
           />
-        </div>
-
-        <div className="relative">
-          <label htmlFor="author" className="block text-sm font-medium text-gray-700 mb-2">
-            Author
-          </label>
-          <div className="relative">
-            <input
-              id="author"
-              type="text"
-              {...register('author', { required: true })}
-              onKeyDown={handleKeyDown}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all relative z-10 bg-transparent"
-              placeholder="Enter author name"
-              autoComplete="off"
-              required
-            />
-            {showSuggestion && (
-              <div className="absolute inset-0 px-4 py-3 pointer-events-none">
-                <span className="text-transparent">{authorInput}</span>
-                <span className="text-gray-400">{authorSuggestion.slice(authorInput.length)}</span>
-              </div>
-            )}
-          </div>
           {showSuggestion && (
-            <p className="text-xs text-gray-500 mt-1">Press Tab to autocomplete</p>
+            <div className="absolute inset-0 px-3 py-3 pointer-events-none text-sm">
+              <span className="text-transparent">{authorInput}</span>
+              <span className="text-zinc-400">{authorSuggestion.slice(authorInput.length)}</span>
+            </div>
           )}
         </div>
+        {showSuggestion && (
+          <p className="text-xs text-zinc-400 mt-1">Press Tab to autocomplete</p>
+        )}
+      </div>
 
-        <div>
-          <label htmlFor="isbn" className="block text-sm font-medium text-gray-700 mb-2">
-            ISBN (Optional)
-          </label>
-          <div className="flex gap-2">
-            <input
-              id="isbn"
-              type="text"
-              {...register('isbn')}
-              className="flex-1 min-w-0 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-              placeholder="Enter ISBN or scan barcode"
-            />
-            <button
-              type="button"
-              onClick={() => setShowScanner(true)}
-              className="flex-shrink-0 px-4 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 active:bg-purple-800 focus:ring-4 focus:ring-purple-300 transition-all flex items-center gap-2"
-              title="Scan barcode"
-            >
-              <CameraIcon className="w-5 h-5" />
-              <span className="hidden sm:inline">Scan</span>
-            </button>
-          </div>
-          {isLoadingIsbn && (
-            <p className="text-xs text-blue-600 mt-1">Loading book data...</p>
-          )}
-          {isbnError && (
-            <p className="text-xs text-red-600 mt-1">{isbnError}</p>
-          )}
-        </div>
-
-        <div>
-          <label htmlFor="coverStyle" className="block text-sm font-medium text-gray-700 mb-2">
-            Cover Style
-          </label>
-          <select
-            id="coverStyle"
-            {...register('coverStyle', { required: true })}
-            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-            required
+      <div>
+        <label htmlFor="isbn" className="block text-xs font-medium text-zinc-600 mb-1">
+          ISBN <span className="text-zinc-400 font-normal">(optional)</span>
+        </label>
+        <div className="flex gap-2">
+          <input
+            id="isbn"
+            type="text"
+            {...register('isbn')}
+            className="flex-1 min-w-0 px-3 py-3 border border-zinc-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+            placeholder="Enter or scan ISBN"
+          />
+          <button
+            type="button"
+            onClick={() => setShowScanner(true)}
+            className="flex-shrink-0 px-3 py-3 bg-purple-600 text-white rounded-xl hover:bg-purple-700 active:scale-95 transition-all flex items-center gap-1.5 text-sm"
+            title="Scan barcode"
           >
-            <option value="">Select cover style</option>
-            {coverStyles.map((style) => (
-              <option key={style} value={style}>
-                {style}
-              </option>
-            ))}
-          </select>
+            <CameraIcon className="w-4 h-4" />
+            <span>Scan</span>
+          </button>
         </div>
+        {isLoadingIsbn && <p className="text-xs text-blue-600 mt-1">Loading book data...</p>}
+        {isbnError && <p className="text-xs text-red-500 mt-1">{isbnError}</p>}
+      </div>
+
+      <div>
+        <label htmlFor="coverStyle" className="block text-xs font-medium text-zinc-600 mb-1">
+          Cover Style
+        </label>
+        <select
+          id="coverStyle"
+          {...register('coverStyle', { required: true })}
+          className="w-full px-3 py-3 border border-zinc-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+          required
+        >
+          <option value="">Select cover style</option>
+          {coverStyles.map((style) => (
+            <option key={style} value={style}>{style}</option>
+          ))}
+        </select>
       </div>
 
       <button
         type="submit"
-        className="w-full md:w-auto px-8 py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 focus:ring-4 focus:ring-blue-300 transition-all flex items-center justify-center gap-2"
+        className="w-full py-3 bg-blue-600 text-white font-medium rounded-xl hover:bg-blue-700 active:scale-[0.98] transition-all flex items-center justify-center gap-2 text-sm mt-1"
       >
-        <PlusIcon className="w-5 h-5" />
+        <PlusIcon className="w-4 h-4" />
         Add Book
       </button>
 
