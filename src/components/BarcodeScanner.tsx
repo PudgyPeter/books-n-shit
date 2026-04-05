@@ -1,469 +1,283 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
-import { BrowserMultiFormatReader, NotFoundException } from '@zxing/library';
-import { CameraIcon, XMarkIcon, CameraIcon as CaptureIcon } from '@heroicons/react/24/outline';
-import { createWorker } from 'tesseract.js';
+import { useEffect, useRef, useState, useCallback } from 'react';
+import { XMarkIcon } from '@heroicons/react/24/outline';
 
 interface BarcodeScannerProps {
   onScan: (isbn: string) => void;
   onClose: () => void;
 }
 
+declare global {
+  interface Window {
+    BarcodeDetector?: any;
+  }
+}
+
+function isValidIsbn(str: string) {
+  const clean = str.replace(/[^0-9X]/gi, '');
+  return clean.length === 10 || clean.length === 13;
+}
+
 export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const codeReaderRef = useRef<BrowserMultiFormatReader | null>(null);
-  const scanIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const ocrWorkerRef = useRef<any>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [lastScanned, setLastScanned] = useState<string>('');
-  const [isScanning, setIsScanning] = useState(false);
-  const [scanStatus, setScanStatus] = useState<string>('Initializing...');
-  const [manualIsbn, setManualIsbn] = useState<string>('');
-  const [cameraInfo, setCameraInfo] = useState<string>('');
-  const [allCameras, setAllCameras] = useState<string[]>([]);
+  const rafRef = useRef<number | null>(null);
+  const zxingRef = useRef<any>(null);
+  const lastScannedRef = useRef<string>('');
+  const streamRef = useRef<MediaStream | null>(null);
 
-  useEffect(() => {
-    console.log('[BarcodeScanner] Component mounted');
-    const codeReader = new BrowserMultiFormatReader();
-    codeReaderRef.current = codeReader;
+  const [status, setStatus] = useState<'init' | 'scanning' | 'found' | 'error'>('init');
+  const [statusMsg, setStatusMsg] = useState('Starting camera...');
+  const [manualIsbn, setManualIsbn] = useState('');
+  const [manualError, setManualError] = useState('');
+  const [engine, setEngine] = useState<'native' | 'zxing' | null>(null);
 
-    startScanning();
+  const handleFound = useCallback((isbn: string) => {
+    const clean = isbn.replace(/[^0-9X]/gi, '');
+    if (clean === lastScannedRef.current) return;
+    lastScannedRef.current = clean;
+    setStatus('found');
+    setStatusMsg(`Found: ${clean}`);
+    onScan(clean);
+    cleanup();
+    onClose();
+  }, [onScan, onClose]);
 
-    return () => {
-      console.log('[BarcodeScanner] Component unmounting, cleaning up');
-      if (scanIntervalRef.current) {
-        clearInterval(scanIntervalRef.current);
-      }
-      if (ocrWorkerRef.current) {
-        ocrWorkerRef.current.terminate();
-      }
-      if (codeReaderRef.current) {
-        codeReaderRef.current.reset();
-      }
-    };
+  const cleanup = useCallback(() => {
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
+    if (zxingRef.current) zxingRef.current.reset();
   }, []);
 
-  const startScanning = async () => {
+  useEffect(() => {
+    startCamera();
+    return cleanup;
+  }, []);
+
+  const startCamera = async () => {
     try {
-      console.log('[BarcodeScanner] Starting scan process...');
-      setError(null);
-      setScanStatus('Requesting camera access...');
-      
-      let stream: MediaStream | null = null;
-      
-      // First, request permission to get camera labels
       const tempStream = await navigator.mediaDevices.getUserMedia({ video: true });
-      tempStream.getTracks().forEach(track => track.stop());
-      
-      // Now enumerate with proper labels
+      tempStream.getTracks().forEach(t => t.stop());
+
       const devices = await navigator.mediaDevices.enumerateDevices();
-      const videoDevices = devices.filter(device => device.kind === 'videoinput');
-      console.log('[BarcodeScanner] Available cameras:', videoDevices.length);
-      
-      const cameraList = videoDevices.map((device, index) => {
-        console.log(`[BarcodeScanner] Camera ${index}: ${device.label || 'Unknown'}`);
-        return `${index}: ${device.label}`;
+      const videoDevices = devices.filter(d => d.kind === 'videoinput');
+
+      const backCameras = videoDevices.filter(d => {
+        const l = d.label.toLowerCase();
+        return l.includes('back') || l.includes('rear') || l.includes('environment') || l.includes('camera2 0');
       });
-      setAllCameras(cameraList);
-      
-      const backCameras = videoDevices.filter(device => 
-        device.label.toLowerCase().includes('back') || 
-        device.label.toLowerCase().includes('rear') ||
-        device.label.toLowerCase().includes('camera 2') ||
-        device.label.toLowerCase().includes('environment')
-      );
-      
-      console.log('[BarcodeScanner] Back cameras found:', backCameras.length);
-      
-      let selectedCamera = null;
-      if (backCameras.length > 0) {
-        // For Samsung devices, camera2 0 is usually the main camera
-        // Look for camera2 0 first
-        let mainCamera = backCameras.find(cam => 
-          cam.label.toLowerCase().includes('camera2 0')
-        );
-        
-        // If not found, try to find main camera by excluding wide-angle keywords
-        if (!mainCamera) {
-          mainCamera = backCameras.find(cam => {
-            const label = cam.label.toLowerCase();
-            return !label.includes('wide') && 
-                   !label.includes('ultra') && 
-                   !label.includes('0.5');
-          });
-        }
-        
-        // Fallback to last back camera
-        selectedCamera = mainCamera || backCameras[backCameras.length - 1];
-        console.log('[BarcodeScanner] Selected camera:', selectedCamera.label);
-      }
-      
+
+      let stream: MediaStream;
       try {
-        if (selectedCamera) {
-          console.log('[BarcodeScanner] Attempting with specific deviceId');
-          const constraints = {
-            video: {
-              deviceId: { exact: selectedCamera.deviceId },
-              width: { ideal: 1920 },
-              height: { ideal: 1080 },
-              focusMode: { ideal: 'continuous' }
-            } as MediaTrackConstraints
-          };
-          stream = await navigator.mediaDevices.getUserMedia(constraints);
-        } else {
-          throw new Error('No suitable camera found, using fallback');
-        }
-      } catch (err) {
-        console.log('[BarcodeScanner] Specific camera failed, trying facingMode');
-        const fallbackConstraints = {
-          video: {
-            facingMode: 'environment',
-            width: { ideal: 1920 },
-            height: { ideal: 1080 }
-          }
-        };
-        stream = await navigator.mediaDevices.getUserMedia(fallbackConstraints);
+        const preferred = backCameras.find(c => {
+          const l = c.label.toLowerCase();
+          return !l.includes('wide') && !l.includes('ultra') && !l.includes('0.5');
+        }) ?? backCameras[backCameras.length - 1];
+
+        stream = preferred
+          ? await navigator.mediaDevices.getUserMedia({
+              video: { deviceId: { exact: preferred.deviceId }, width: { ideal: 1920 }, height: { ideal: 1080 } }
+            })
+          : await navigator.mediaDevices.getUserMedia({
+              video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } }
+            });
+      } catch {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'environment' }
+        });
       }
-      
-      if (!stream) {
-        throw new Error('Failed to get camera stream');
-      }
-      
-      const videoTrack = stream.getVideoTracks()[0];
-      const settings = videoTrack.getSettings();
-      console.log('[BarcodeScanner] Active camera settings:', {
-        deviceId: settings.deviceId,
-        width: settings.width,
-        height: settings.height,
-        facingMode: settings.facingMode
-      });
-      
-      const cameraLabel = selectedCamera?.label || videoTrack.label || 'Camera';
-      const resolution = `${settings.width}x${settings.height}`;
-      const isWideAngle = cameraLabel.toLowerCase().includes('wide') || cameraLabel.toLowerCase().includes('0.5');
-      const cameraType = isWideAngle ? '⚠️ Wide-Angle' : '✓ Main';
-      setCameraInfo(`${cameraType}: ${cameraLabel} | ${resolution}`);
-      
+
+      streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         await videoRef.current.play();
       }
 
-      setScanStatus('Initializing OCR engine...');
-      console.log('[BarcodeScanner] Camera active, initializing OCR');
-      
-      ocrWorkerRef.current = await createWorker('eng', 1, {
-        logger: () => {}
-      });
-      await ocrWorkerRef.current.setParameters({
-        tessedit_char_whitelist: 'ISBN0123456789-X ',
-      });
-      
-      console.log('[BarcodeScanner] OCR ready, waiting for video to be ready');
-      
-      await new Promise<void>((resolve) => {
-        const checkVideo = () => {
-          if (videoRef.current && videoRef.current.readyState === videoRef.current.HAVE_ENOUGH_DATA) {
-            console.log('[BarcodeScanner] Video is ready!');
-            resolve();
-          } else {
-            setTimeout(checkVideo, 100);
-          }
-        };
-        checkVideo();
-      });
-      
-      setScanStatus('Ready! Point at ISBN barcode or text');
-      setIsScanning(true);
-      startDualDetection();
+      if (window.BarcodeDetector) {
+        setEngine('native');
+        setStatus('scanning');
+        setStatusMsg('Point camera at barcode');
+        startNativeScan();
+      } else {
+        const { BrowserMultiFormatReader } = await import('@zxing/library');
+        zxingRef.current = new BrowserMultiFormatReader();
+        setEngine('zxing');
+        setStatus('scanning');
+        setStatusMsg('Point camera at barcode');
+        startZxingScan();
+      }
     } catch (err: any) {
-      console.error('[BarcodeScanner] Failed to start:', err);
-      setError(err?.message || 'Failed to start camera. Please check permissions.');
-      setScanStatus('Error occurred');
+      setStatus('error');
+      setStatusMsg(err?.message?.includes('Permission') ? 'Camera permission denied' : 'Could not start camera');
     }
   };
 
-  const startDualDetection = () => {
-    console.log('[BarcodeScanner] Starting dual detection loop');
-    let scanCount = 0;
-    
-    scanIntervalRef.current = setInterval(async () => {
-      if (!videoRef.current || !canvasRef.current) {
-        console.log('[BarcodeScanner] Missing refs');
+  const startNativeScan = () => {
+    const detector = new window.BarcodeDetector!({ formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128'] });
+
+    const tick = async () => {
+      if (!videoRef.current || videoRef.current.readyState < 2) {
+        rafRef.current = requestAnimationFrame(tick);
         return;
       }
-      
-      const video = videoRef.current;
-      const canvas = canvasRef.current;
-      
-      if (video.readyState !== video.HAVE_ENOUGH_DATA) {
-        console.log('[BarcodeScanner] Video not ready, readyState:', video.readyState);
-        return;
-      }
-      
       try {
-        const context = canvas.getContext('2d');
-        if (!context) return;
-        
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        context.drawImage(video, 0, 0, canvas.width, canvas.height);
-        
-        scanCount++;
-        console.log(`[BarcodeScanner] Scan attempt #${scanCount}`);
-        setScanStatus(`Scanning... (attempt ${scanCount})`);
-        
-        await Promise.all([
-          tryBarcodeDetection(canvas),
-          tryOCRDetection(canvas, context)
-        ]);
-      } catch (err) {
-        console.error('[BarcodeScanner] Detection error:', err);
-      }
-    }, 2000);
-  };
-
-  const tryBarcodeDetection = async (canvas: HTMLCanvasElement) => {
-    try {
-      if (!codeReaderRef.current) {
-        console.log('[BarcodeScanner] Barcode reader not ready');
-        return;
-      }
-      
-      const imageData = canvas.toDataURL('image/png');
-      const img = new Image();
-      img.src = imageData;
-      
-      await new Promise((resolve) => {
-        img.onload = resolve;
-      });
-      
-      const result = await codeReaderRef.current.decodeFromImageElement(img);
-      if (result) {
-        const text = result.getText();
-        console.log('[BarcodeScanner] Barcode raw result:', text);
-        const isbnMatch = text.match(/\d{10,13}/);
-        if (isbnMatch && isbnMatch[0] !== lastScanned) {
-          console.log('[BarcodeScanner] ✓ Barcode detected valid ISBN:', isbnMatch[0]);
-          setLastScanned(isbnMatch[0]);
-          setScanStatus(`Found ISBN: ${isbnMatch[0]}`);
-          onScan(isbnMatch[0]);
-          handleClose();
-        } else {
-          console.log('[BarcodeScanner] Barcode: No valid ISBN in result');
-        }
-      }
-    } catch (err) {
-      if (!(err instanceof NotFoundException)) {
-        console.error('[BarcodeScanner] Barcode error:', err);
-      }
-    }
-  };
-
-  const tryOCRDetection = async (canvas: HTMLCanvasElement, context: CanvasRenderingContext2D) => {
-    try {
-      if (!ocrWorkerRef.current) {
-        console.log('[BarcodeScanner] OCR worker not ready');
-        return;
-      }
-      
-      const tempCanvas = document.createElement('canvas');
-      tempCanvas.width = canvas.width;
-      tempCanvas.height = canvas.height;
-      const tempContext = tempCanvas.getContext('2d');
-      if (!tempContext) return;
-      
-      tempContext.drawImage(canvas, 0, 0);
-      const imageData = tempContext.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
-      const data = imageData.data;
-      
-      for (let i = 0; i < data.length; i += 4) {
-        const avg = (data[i] + data[i + 1] + data[i + 2]) / 3;
-        const threshold = avg > 128 ? 255 : 0;
-        data[i] = threshold;
-        data[i + 1] = threshold;
-        data[i + 2] = threshold;
-      }
-      
-      tempContext.putImageData(imageData, 0, 0);
-      
-      const { data: { text } } = await ocrWorkerRef.current.recognize(tempCanvas);
-      console.log('[BarcodeScanner] OCR raw text:', text);
-      
-      const patterns = [
-        /ISBN[\s:-]*(\d[\d\s-]{9,16}\d|\d{9}[\dX])/i,
-        /ISBN[\s:-]*([0-9]{10,13})/i,
-        /ISBN[\s:-]*([0-9-]{10,17})/i,
-        /([0-9]{13})/,
-        /([0-9]{10})/,
-        /([0-9-]{13,17})/
-      ];
-      
-      for (const pattern of patterns) {
-        const isbnMatch = text.match(pattern);
-        if (isbnMatch) {
-          const cleanIsbn = isbnMatch[1].replace(/[^0-9X]/gi, '');
-          console.log('[BarcodeScanner] OCR found potential ISBN:', cleanIsbn, 'length:', cleanIsbn.length);
-          if (cleanIsbn.length >= 10 && cleanIsbn.length <= 13 && cleanIsbn !== lastScanned) {
-            console.log('[BarcodeScanner] ✓ OCR detected valid ISBN:', cleanIsbn);
-            setLastScanned(cleanIsbn);
-            setScanStatus(`Found ISBN: ${cleanIsbn}`);
-            onScan(cleanIsbn);
-            handleClose();
+        const barcodes = await detector.detect(videoRef.current);
+        for (const barcode of barcodes) {
+          if (isValidIsbn(barcode.rawValue)) {
+            handleFound(barcode.rawValue);
             return;
           }
         }
+      } catch {}
+      rafRef.current = requestAnimationFrame(tick);
+    };
+    rafRef.current = requestAnimationFrame(tick);
+  };
+
+  const startZxingScan = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    let busy = false;
+
+    const tick = async () => {
+      const video = videoRef.current;
+      if (!video || video.readyState < 2 || busy) {
+        rafRef.current = requestAnimationFrame(tick);
+        return;
       }
-      
-      console.log('[BarcodeScanner] OCR: No valid ISBN found in text');
-    } catch (err) {
-      console.error('[BarcodeScanner] OCR error:', err);
-    }
+
+      busy = true;
+      try {
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+          ctx.drawImage(video, 0, 0);
+
+          const img = new Image();
+          img.src = canvas.toDataURL('image/png');
+          await new Promise(r => { img.onload = r; });
+
+          const result = await zxingRef.current.decodeFromImageElement(img);
+          if (result) {
+            const text = result.getText();
+            const match = text.match(/\d{10,13}/);
+            if (match && isValidIsbn(match[0])) {
+              handleFound(match[0]);
+              return;
+            }
+          }
+        }
+      } catch {}
+      busy = false;
+      rafRef.current = requestAnimationFrame(tick);
+    };
+    rafRef.current = requestAnimationFrame(tick);
   };
 
   const handleManualSubmit = () => {
-    const cleanIsbn = manualIsbn.replace(/[^0-9X]/gi, '');
-    if (cleanIsbn.length >= 10 && cleanIsbn.length <= 13) {
-      console.log('[BarcodeScanner] Manual ISBN entered:', cleanIsbn);
-      onScan(cleanIsbn);
-      handleClose();
-    } else {
-      setScanStatus('Please enter a valid 10 or 13 digit ISBN');
+    const clean = manualIsbn.replace(/[^0-9X]/gi, '');
+    if (!isValidIsbn(clean)) {
+      setManualError('Enter a valid 10 or 13 digit ISBN');
+      return;
     }
+    setManualError('');
+    onScan(clean);
+    cleanup();
+    onClose();
   };
 
   const handleClose = () => {
-    console.log('[BarcodeScanner] Closing scanner');
-    
-    if (scanIntervalRef.current) {
-      clearInterval(scanIntervalRef.current);
-    }
-    
-    if (ocrWorkerRef.current) {
-      ocrWorkerRef.current.terminate();
-    }
-    
-    if (videoRef.current && videoRef.current.srcObject) {
-      const stream = videoRef.current.srcObject as MediaStream;
-      stream.getTracks().forEach(track => track.stop());
-    }
-    
-    if (codeReaderRef.current) {
-      codeReaderRef.current.reset();
-    }
+    cleanup();
     onClose();
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-75 z-50 overflow-y-auto" style={{ WebkitOverflowScrolling: 'touch' }}>
-      <div className="min-h-screen flex items-center justify-center p-4">
-        <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full">
-          <div className="bg-blue-600 text-white p-4 flex items-center justify-between rounded-t-xl">
-            <div className="flex items-center gap-2">
-              <CameraIcon className="w-6 h-6" />
-              <h3 className="text-lg font-semibold">Scan ISBN</h3>
-            </div>
-            <button
-              onClick={handleClose}
-              className="p-1 hover:bg-blue-700 rounded-lg transition-colors"
-            >
-              <XMarkIcon className="w-6 h-6" />
-            </button>
+    <div className="fixed inset-0 z-50 flex flex-col bg-black">
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 py-3 z-10">
+        <span className="text-white text-sm font-medium">Scan ISBN barcode</span>
+        <button onClick={handleClose} className="text-white/70 hover:text-white active:scale-90 transition p-1">
+          <XMarkIcon className="w-6 h-6" />
+        </button>
+      </div>
+
+      {/* Camera */}
+      <div className="flex-1 relative overflow-hidden">
+        <video
+          ref={videoRef}
+          className="absolute inset-0 w-full h-full object-cover"
+          playsInline
+          autoPlay
+          muted
+        />
+        <canvas ref={canvasRef} className="hidden" />
+
+        {/* Viewfinder overlay */}
+        <div className="absolute inset-0 flex items-center justify-center">
+          <div className="relative w-72 h-36">
+            {/* Dark overlay outside box */}
+            <div className="absolute inset-0" style={{ boxShadow: '0 0 0 9999px rgba(0,0,0,0.55)' }} />
+            {/* Corner markers */}
+            <div className="absolute top-0 left-0 w-6 h-6 border-t-3 border-l-3 border-white rounded-tl-sm" style={{ borderWidth: '3px 0 0 3px' }} />
+            <div className="absolute top-0 right-0 w-6 h-6 border-white rounded-tr-sm" style={{ borderWidth: '3px 3px 0 0' }} />
+            <div className="absolute bottom-0 left-0 w-6 h-6 border-white rounded-bl-sm" style={{ borderWidth: '0 0 3px 3px' }} />
+            <div className="absolute bottom-0 right-0 w-6 h-6 border-white rounded-br-sm" style={{ borderWidth: '0 3px 3px 0' }} />
+            {/* Scan line animation */}
+            {status === 'scanning' && (
+              <div className="absolute left-0 right-0 h-0.5 bg-blue-400/80" style={{ animation: 'scanline 2s ease-in-out infinite' }} />
+            )}
           </div>
+        </div>
 
-          <div className="p-4 md:p-6">
-            {error ? (
-              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-4">
-                {error}
-              </div>
-            ) : null}
-
-            <div className="relative bg-gray-900 rounded-lg overflow-hidden mb-4">
-              <video
-                ref={videoRef}
-                className="w-full h-auto"
-                style={{ maxHeight: '300px' }}
-                playsInline
-                autoPlay
-                muted
-              />
-              <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-                <div className="border-4 border-green-500 rounded-lg" style={{ width: '80%', height: '60%', boxShadow: '0 0 0 9999px rgba(0,0,0,0.5)' }}>
-                  <div className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 border-green-500"></div>
-                  <div className="absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 border-green-500"></div>
-                  <div className="absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 border-green-500"></div>
-                  <div className="absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 border-green-500"></div>
-                </div>
-              </div>
-              <canvas ref={canvasRef} style={{ display: 'none' }} />
-            </div>
-
-            <div className="space-y-4">
-              <div className="text-center">
-                <div className={`text-sm font-medium mb-2 ${isScanning ? 'text-green-600' : 'text-gray-600'}`}>
-                  {scanStatus}
-                </div>
-                {cameraInfo && (
-                  <div className="text-xs font-mono mb-2 px-2 py-1 rounded" style={{
-                    backgroundColor: cameraInfo.includes('⚠️') ? '#fef2f2' : '#eff6ff',
-                    color: cameraInfo.includes('⚠️') ? '#dc2626' : '#2563eb'
-                  }}>
-                    {cameraInfo}
-                  </div>
-                )}
-                {allCameras.length > 0 && (
-                  <details className="text-xs text-gray-600 mb-2">
-                    <summary className="cursor-pointer hover:text-gray-900">Available Cameras ({allCameras.length})</summary>
-                    <div className="mt-2 space-y-1 bg-gray-50 p-2 rounded">
-                      {allCameras.map((cam, idx) => (
-                        <div key={idx} className="font-mono">{cam}</div>
-                      ))}
-                    </div>
-                  </details>
-                )}
-                <p className="text-xs text-gray-500">
-                  Scanning automatically with barcode + OCR detection
-                </p>
-              </div>
-              
-              <div className="relative">
-                <div className="absolute inset-0 flex items-center">
-                  <div className="w-full border-t border-gray-300"></div>
-                </div>
-                <div className="relative flex justify-center text-sm">
-                  <span className="px-2 bg-white text-gray-500">or enter manually</span>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <input
-                  type="text"
-                  value={manualIsbn}
-                  onChange={(e) => setManualIsbn(e.target.value)}
-                  placeholder="Enter ISBN (e.g., 9780892790796)"
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  inputMode="numeric"
-                  pattern="[0-9X-]*"
-                />
-                <button
-                  type="button"
-                  onClick={handleManualSubmit}
-                  style={{ display: 'block', width: '100%' }}
-                  className="px-6 py-3 bg-blue-600 text-white font-medium rounded-lg active:bg-blue-800"
-                >
-                  Submit ISBN
-                </button>
-              </div>
-              
-              <p className="text-xs text-gray-500 text-center">
-                Tip: Good lighting helps OCR. Hold book 6-12 inches away
-              </p>
-            </div>
+        {/* Status pill */}
+        <div className="absolute bottom-6 left-0 right-0 flex justify-center">
+          <div className={`px-4 py-2 rounded-full text-sm font-medium ${
+            status === 'error' ? 'bg-red-500/90 text-white' :
+            status === 'found' ? 'bg-green-500/90 text-white' :
+            'bg-black/60 text-white/90'
+          }`}>
+            {statusMsg}
+            {engine === 'zxing' && status === 'scanning' && (
+              <span className="ml-2 text-white/50 text-xs">ZXing</span>
+            )}
           </div>
         </div>
       </div>
+
+      {/* Manual entry panel */}
+      <div className="bg-zinc-900 px-4 pt-4 pb-6 safe-area-bottom">
+        <p className="text-zinc-400 text-xs text-center mb-3">or enter manually</p>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={manualIsbn}
+            onChange={(e) => { setManualIsbn(e.target.value); setManualError(''); }}
+            onKeyDown={(e) => e.key === 'Enter' && handleManualSubmit()}
+            placeholder="ISBN (e.g. 9780892790796)"
+            className="flex-1 bg-zinc-800 text-white placeholder-zinc-500 px-3 py-3 rounded-xl text-sm border border-zinc-700 focus:border-blue-500 focus:outline-none"
+            inputMode="numeric"
+          />
+          <button
+            type="button"
+            onClick={handleManualSubmit}
+            className="bg-blue-600 hover:bg-blue-700 active:scale-95 text-white px-4 py-3 rounded-xl text-sm font-medium transition"
+          >
+            Go
+          </button>
+        </div>
+        {manualError && <p className="text-red-400 text-xs mt-2">{manualError}</p>}
+      </div>
+
+      <style>{`
+        @keyframes scanline {
+          0%   { top: 10%; }
+          50%  { top: 85%; }
+          100% { top: 10%; }
+        }
+      `}</style>
     </div>
   );
 }
