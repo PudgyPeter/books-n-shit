@@ -1,84 +1,159 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-async function fetchFromOpenLibrary(isbn: string) {
-  const response = await fetch(
-    `https://openlibrary.org/api/books?bibkeys=ISBN:${isbn}&format=json&jscmd=data`,
-    { cache: 'no-store' }
-  );
-  
-  if (!response.ok) {
-    return null;
-  }
-  
-  const data = await response.json();
-  const bookKey = `ISBN:${isbn}`;
-  const bookData = data[bookKey];
-  
-  if (!bookData) {
-    return null;
-  }
-
-  const authors = bookData.authors?.map((author: any) => author.name).join(', ') || '';
-  
-  return {
-    title: bookData.title || '',
-    author: authors,
-    isbn: isbn,
-    source: 'Open Library'
-  };
+interface BookResult {
+  title: string;
+  author: string;
+  isbn: string;
+  source: string;
 }
 
-async function fetchFromGoogleBooks(isbn: string) {
-  const response = await fetch(
-    `https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}`,
-    { cache: 'no-store' }
-  );
-  
-  if (!response.ok) {
-    return null;
-  }
-  
-  const data = await response.json();
-  
-  if (!data.items || data.items.length === 0) {
-    return null;
-  }
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error('timeout')), ms))
+  ]);
+}
 
-  const bookData = data.items[0].volumeInfo;
-  const authors = bookData.authors?.join(', ') || '';
-  
-  return {
-    title: bookData.title || '',
-    author: authors,
-    isbn: isbn,
-    source: 'Google Books'
-  };
+function isbn10to13(isbn10: string): string {
+  const digits = isbn10.replace(/[^0-9X]/gi, '').slice(0, 9);
+  const raw = '978' + digits;
+  let sum = 0;
+  for (let i = 0; i < 12; i++) {
+    sum += parseInt(raw[i]) * (i % 2 === 0 ? 1 : 3);
+  }
+  const check = (10 - (sum % 10)) % 10;
+  return raw + check;
+}
+
+function isbn13to10(isbn13: string): string {
+  const digits = isbn13.replace(/[^0-9]/gi, '').slice(3, 12);
+  let sum = 0;
+  for (let i = 0; i < 9; i++) {
+    sum += parseInt(digits[i]) * (10 - i);
+  }
+  const check = (11 - (sum % 11)) % 11;
+  return digits + (check === 10 ? 'X' : check.toString());
+}
+
+function getIsbnVariants(isbn: string): string[] {
+  const clean = isbn.replace(/[^0-9X]/gi, '');
+  const variants = new Set([clean]);
+  if (clean.length === 10) variants.add(isbn10to13(clean));
+  if (clean.length === 13 && clean.startsWith('978')) variants.add(isbn13to10(clean));
+  return Array.from(variants);
+}
+
+async function fetchFromOpenLibrary(isbn: string): Promise<BookResult | null> {
+  try {
+    const response = await withTimeout(
+      fetch(`https://openlibrary.org/api/books?bibkeys=ISBN:${isbn}&format=json&jscmd=data`, { cache: 'no-store' }),
+      5000
+    );
+    if (!response.ok) return null;
+    const data = await response.json();
+    const bookData = data[`ISBN:${isbn}`];
+    if (!bookData) return null;
+    const author = bookData.authors?.map((a: any) => a.name).join(', ') || '';
+    if (!bookData.title && !author) return null;
+    return { title: bookData.title || '', author, isbn, source: 'Open Library' };
+  } catch {
+    return null;
+  }
+}
+
+async function fetchFromGoogleBooks(isbn: string): Promise<BookResult | null> {
+  try {
+    const response = await withTimeout(
+      fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}`, { cache: 'no-store' }),
+      5000
+    );
+    if (!response.ok) return null;
+    const data = await response.json();
+    if (!data.items?.length) return null;
+    const info = data.items[0].volumeInfo;
+    const author = info.authors?.join(', ') || '';
+    if (!info.title && !author) return null;
+    return { title: info.title || '', author, isbn, source: 'Google Books' };
+  } catch {
+    return null;
+  }
+}
+
+async function fetchFromWorldCat(isbn: string): Promise<BookResult | null> {
+  try {
+    const response = await withTimeout(
+      fetch(`https://www.worldcat.org/isbn/${isbn}`, {
+        cache: 'no-store',
+        headers: { 'Accept': 'application/json' }
+      }),
+      5000
+    );
+    if (!response.ok) return null;
+
+    // WorldCat returns HTML - parse the JSON-LD embedded in the page
+    const html = await response.text();
+    const jsonLdMatch = html.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/);
+    if (!jsonLdMatch) return null;
+    const jsonLd = JSON.parse(jsonLdMatch[1]);
+    const title = jsonLd.name || jsonLd.title || '';
+    const authorRaw = jsonLd.author;
+    const author = Array.isArray(authorRaw)
+      ? authorRaw.map((a: any) => a.name || a).join(', ')
+      : (authorRaw?.name || authorRaw || '');
+    if (!title && !author) return null;
+    return { title, author, isbn, source: 'WorldCat' };
+  } catch {
+    return null;
+  }
+}
+
+async function tryAllSources(isbn: string): Promise<BookResult | null> {
+  // Race all three sources simultaneously, return first non-null result
+  const results = await Promise.allSettled([
+    fetchFromOpenLibrary(isbn),
+    fetchFromGoogleBooks(isbn),
+    fetchFromWorldCat(isbn),
+  ]);
+
+  for (const result of results) {
+    if (result.status === 'fulfilled' && result.value) {
+      return result.value;
+    }
+  }
+  return null;
 }
 
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const isbn = searchParams.get('isbn');
-    
+
     if (!isbn) {
       return NextResponse.json({ error: 'ISBN is required' }, { status: 400 });
     }
 
     const cleanIsbn = isbn.replace(/[^0-9X]/gi, '');
-    
-    let bookData = await fetchFromOpenLibrary(cleanIsbn);
-    
-    if (!bookData) {
-      console.log(`Book not found in Open Library, trying Google Books for ISBN: ${cleanIsbn}`);
-      bookData = await fetchFromGoogleBooks(cleanIsbn);
+    const variants = getIsbnVariants(cleanIsbn);
+
+    // Try all variants across all sources simultaneously
+    const allAttempts = variants.map(v => tryAllSources(v));
+    const allResults = await Promise.allSettled(allAttempts);
+
+    let bookData: BookResult | null = null;
+    for (const result of allResults) {
+      if (result.status === 'fulfilled' && result.value) {
+        bookData = result.value;
+        break;
+      }
     }
-    
+
     if (!bookData) {
+      console.log(`Book not found for ISBN: ${cleanIsbn} (tried variants: ${variants.join(', ')})`);
       return NextResponse.json({ error: 'Book not found' }, { status: 404 });
     }
 
     console.log(`Book found via ${bookData.source}: ${bookData.title}`);
-    
+
     return NextResponse.json({
       title: bookData.title,
       author: bookData.author,
