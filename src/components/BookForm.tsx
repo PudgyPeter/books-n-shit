@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
-import { BookFormData, CoverStyle } from '@/types/book';
+import { BookFormData } from '@/types/book';
 import { PlusIcon, CameraIcon } from '@heroicons/react/24/outline';
 import dynamic from 'next/dynamic';
 
@@ -12,15 +12,6 @@ interface BookFormProps {
   onSubmit: (data: BookFormData) => void;
   authors: string[];
 }
-
-const coverStyles: CoverStyle[] = [
-  'Hardback',
-  'Softback',
-  'Paperback',
-  'Mass Market Paperback',
-  'Leather Bound',
-  'Board Book',
-];
 
 export default function BookForm({ onSubmit, authors }: BookFormProps) {
   const { register, handleSubmit, reset, watch, setValue } = useForm<BookFormData>();
@@ -159,23 +150,6 @@ export default function BookForm({ onSubmit, authors }: BookFormProps) {
         </div>
         {isLoadingIsbn && <p className="text-xs text-blue-600 mt-1">Loading book data...</p>}
         {isbnError && <p className="text-xs text-red-500 mt-1">{isbnError}</p>}
-      </div>
-
-      <div>
-        <label htmlFor="coverStyle" className="block text-xs font-medium text-zinc-600 mb-1">
-          Cover Style
-        </label>
-        <select
-          id="coverStyle"
-          {...register('coverStyle', { required: true })}
-          className="w-full px-3 py-3 border border-zinc-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-          required
-        >
-          <option value="">Select cover style</option>
-          {coverStyles.map((style) => (
-            <option key={style} value={style}>{style}</option>
-          ))}
-        </select>
       </div>
 
       <button

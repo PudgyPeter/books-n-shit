@@ -55,10 +55,7 @@ export default function BookList({ books, onDelete }: BookListProps) {
             <h2 className="font-semibold text-sm leading-tight line-clamp-2 text-zinc-900">{book.title}</h2>
             <p className="text-xs text-zinc-500 truncate mt-0.5">{book.author}</p>
 
-            <div className="mt-2 flex items-center justify-between gap-1">
-              <span className="text-[10px] bg-zinc-100 text-zinc-600 px-2 py-0.5 rounded-full truncate max-w-[80px]">
-                {book.coverStyle}
-              </span>
+            <div className="mt-2 flex items-center justify-end gap-1">
               <button
                 onClick={() => onDelete(book.id)}
                 className="text-red-400 hover:text-red-600 active:scale-90 transition p-1 rounded-lg hover:bg-red-50"

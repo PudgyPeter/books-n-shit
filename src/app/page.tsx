@@ -101,8 +101,7 @@ export default function Home() {
         default:
           return (
             book.title.toLowerCase().includes(lowerSearchTerm) ||
-            book.author.toLowerCase().includes(lowerSearchTerm) ||
-            book.coverStyle.toLowerCase().includes(lowerSearchTerm)
+            book.author.toLowerCase().includes(lowerSearchTerm)
           );
       }
     });
