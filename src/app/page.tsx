@@ -133,7 +133,7 @@ export default function Home() {
       const res = await fetch(`/api/isbn?isbn=${isbn}`);
       if (res.ok) {
         const data = await res.json();
-        const ok = await addBookDirect({ title: data.title, author: data.author, isbn });
+        const ok = await addBookDirect({ title: data.title, author: data.author, isbn, coverUrl: data.coverUrl });
         if (ok) {
           await fetchBooks();
           setToast({ msg: `Added: ${data.title}`, type: 'success' });

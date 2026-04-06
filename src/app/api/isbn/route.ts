@@ -5,6 +5,7 @@ interface BookResult {
   author: string;
   isbn: string;
   source: string;
+  coverUrl?: string;
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
@@ -61,6 +62,14 @@ async function fetchFromOpenLibrary(isbn: string): Promise<BookResult | null> {
   }
 }
 
+function extractGoogleCover(info: any): string | undefined {
+  const links = info.imageLinks;
+  if (!links) return undefined;
+  // Prefer largest available, upgrade http -> https
+  const url = links.extraLarge || links.large || links.medium || links.thumbnail || links.smallThumbnail;
+  return url ? url.replace('http://', 'https://') : undefined;
+}
+
 async function fetchFromGoogleBooks(isbn: string): Promise<BookResult | null> {
   try {
     const response = await withTimeout(
@@ -73,14 +82,13 @@ async function fetchFromGoogleBooks(isbn: string): Promise<BookResult | null> {
     const info = data.items[0].volumeInfo;
     const author = info.authors?.join(', ') || '';
     if (!info.title && !author) return null;
-    return { title: info.title || '', author, isbn, source: 'Google Books' };
+    return { title: info.title || '', author, isbn, coverUrl: extractGoogleCover(info), source: 'Google Books' };
   } catch {
     return null;
   }
 }
 
 async function fetchFromGoogleBooksTitle(isbn: string): Promise<BookResult | null> {
-  // Try Google Books with a broader query in case isbn: prefix misses it
   try {
     const response = await withTimeout(
       fetch(`https://www.googleapis.com/books/v1/volumes?q=${isbn}&maxResults=1`, { cache: 'no-store' }),
@@ -90,13 +98,12 @@ async function fetchFromGoogleBooksTitle(isbn: string): Promise<BookResult | nul
     const data = await response.json();
     if (!data.items?.length) return null;
     const info = data.items[0].volumeInfo;
-    // Verify the result actually matches the ISBN
     const industryIds: any[] = info.industryIdentifiers || [];
     const isbnMatch = industryIds.some((id: any) => id.identifier?.replace(/-/g, '') === isbn);
     if (!isbnMatch && industryIds.length > 0) return null;
     const author = info.authors?.join(', ') || '';
     if (!info.title) return null;
-    return { title: info.title, author, isbn, source: 'Google Books' };
+    return { title: info.title, author, isbn, coverUrl: extractGoogleCover(info), source: 'Google Books' };
   } catch {
     return null;
   }
@@ -151,8 +158,6 @@ async function fetchFromWorldCat(isbn: string): Promise<BookResult | null> {
 }
 
 async function fetchFromGoogleBooksLoose(isbn: string): Promise<BookResult | null> {
-  // Last resort: search ISBN as plain text, no isbn: prefix and no identifier verification
-  // Catches regional editions (e.g. Australian prints) present in Google Books but not indexed by exact ISBN
   try {
     const response = await withTimeout(
       fetch(`https://www.googleapis.com/books/v1/volumes?q=${isbn}&maxResults=3`, { cache: 'no-store' }),
@@ -161,13 +166,12 @@ async function fetchFromGoogleBooksLoose(isbn: string): Promise<BookResult | nul
     if (!response.ok) return null;
     const data = await response.json();
     if (!data.items?.length) return null;
-    // Take the first result that has both a title and author
     for (const item of data.items) {
       const info = item.volumeInfo;
       const title = info.title || '';
       const author = info.authors?.join(', ') || '';
       if (title && author) {
-        return { title, author, isbn, source: 'Google Books' };
+        return { title, author, isbn, coverUrl: extractGoogleCover(info), source: 'Google Books' };
       }
     }
     return null;
@@ -230,6 +234,7 @@ export async function GET(request: NextRequest) {
       title: bookData.title,
       author: bookData.author,
       isbn: bookData.isbn,
+      coverUrl: bookData.coverUrl,
     });
   } catch (error) {
     console.error('Error fetching ISBN data:', error);

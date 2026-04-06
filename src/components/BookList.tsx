@@ -44,10 +44,19 @@ export default function BookList({ books, onDelete }: BookListProps) {
           className="bg-white rounded-2xl shadow-sm overflow-hidden active:scale-[0.98] transition-transform"
         >
           {/* Cover */}
-          <div className={`h-28 bg-gradient-to-br ${getGradient(book.id)} flex items-center justify-center`}>
-            <span className="text-white text-3xl font-bold drop-shadow">
-              {book.title[0]?.toUpperCase() ?? '?'}
-            </span>
+          <div className={`h-28 relative overflow-hidden ${!book.coverUrl ? `bg-gradient-to-br ${getGradient(book.id)}` : 'bg-zinc-100'} flex items-center justify-center`}>
+            {book.coverUrl ? (
+              <img
+                src={book.coverUrl}
+                alt={book.title}
+                className="w-full h-full object-cover"
+                onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+              />
+            ) : (
+              <span className="text-white text-3xl font-bold drop-shadow">
+                {book.title[0]?.toUpperCase() ?? '?'}
+              </span>
+            )}
           </div>
 
           {/* Info */}

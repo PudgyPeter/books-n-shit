@@ -24,6 +24,7 @@ export default function BookForm({ onSubmit, authors, defaultIsbn, isbnNotFound 
   const [showScanner, setShowScanner] = useState(false);
   const [isLoadingIsbn, setIsLoadingIsbn] = useState(false);
   const [isbnError, setIsbnError] = useState<string | null>(isbnNotFound ? 'ISBN not found — enter title and author manually.' : null);
+  const [coverUrl, setCoverUrl] = useState<string | undefined>(undefined);
   
   const authorInput = watch('author');
 
@@ -45,8 +46,9 @@ export default function BookForm({ onSubmit, authors, defaultIsbn, isbnNotFound 
   }, [authorInput, authors]);
 
   const handleFormSubmit = (data: BookFormData) => {
-    onSubmit(data);
+    onSubmit({ ...data, coverUrl });
     reset();
+    setCoverUrl(undefined);
     setShowSuggestion(false);
   };
 
@@ -75,6 +77,7 @@ export default function BookForm({ onSubmit, authors, defaultIsbn, isbnNotFound 
       if (data.title) setValue('title', data.title);
       if (data.author) setValue('author', data.author);
       if (data.isbn) setValue('isbn', data.isbn);
+      if (data.coverUrl) { setValue('coverUrl', data.coverUrl); setCoverUrl(data.coverUrl); }
     } catch (err: any) {
       setIsbnError(err.message || 'Book not found. ISBN saved - enter title and author manually.');
     } finally {
