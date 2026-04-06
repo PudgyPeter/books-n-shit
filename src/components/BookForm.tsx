@@ -11,15 +11,19 @@ const BarcodeScanner = dynamic(() => import('./BarcodeScanner'), { ssr: false })
 interface BookFormProps {
   onSubmit: (data: BookFormData) => void;
   authors: string[];
+  defaultIsbn?: string;
+  isbnNotFound?: boolean;
 }
 
-export default function BookForm({ onSubmit, authors }: BookFormProps) {
-  const { register, handleSubmit, reset, watch, setValue } = useForm<BookFormData>();
+export default function BookForm({ onSubmit, authors, defaultIsbn, isbnNotFound }: BookFormProps) {
+  const { register, handleSubmit, reset, watch, setValue } = useForm<BookFormData>({
+    defaultValues: { isbn: defaultIsbn ?? '' },
+  });
   const [authorSuggestion, setAuthorSuggestion] = useState<string>('');
   const [showSuggestion, setShowSuggestion] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
   const [isLoadingIsbn, setIsLoadingIsbn] = useState(false);
-  const [isbnError, setIsbnError] = useState<string | null>(null);
+  const [isbnError, setIsbnError] = useState<string | null>(isbnNotFound ? 'ISBN not found — enter title and author manually.' : null);
   
   const authorInput = watch('author');
 

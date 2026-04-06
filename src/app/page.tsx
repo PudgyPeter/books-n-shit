@@ -4,7 +4,10 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { Book, BookFormData } from '@/types/book';
 import BookForm from '@/components/BookForm';
 import BookList from '@/components/BookList';
-import { PlusIcon, MagnifyingGlassIcon, XMarkIcon, CloudArrowUpIcon, CloudArrowDownIcon, ArrowDownTrayIcon, ArrowUpTrayIcon, TrashIcon } from '@heroicons/react/24/outline';
+import { PlusIcon, MagnifyingGlassIcon, XMarkIcon, CloudArrowUpIcon, CloudArrowDownIcon, ArrowDownTrayIcon, ArrowUpTrayIcon, TrashIcon, CameraIcon } from '@heroicons/react/24/outline';
+import dynamic from 'next/dynamic';
+
+const BarcodeScanner = dynamic(() => import('@/components/BarcodeScanner'), { ssr: false });
 
 const LS_KEY = 'book-catalog-backup';
 
@@ -35,6 +38,8 @@ export default function Home() {
   const [showModal, setShowModal] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
   const [gistStatus, setGistStatus] = useState<string | null>(null);
+  const [showQuickScanner, setShowQuickScanner] = useState(false);
+  const [quickScanState, setQuickScanState] = useState<{ isbn: string; notFound: boolean } | null>(null);
   const importRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -107,6 +112,41 @@ export default function Home() {
     });
   }, [books, searchTerm, searchBy]);
 
+  const addBookDirect = async (data: BookFormData): Promise<boolean> => {
+    const newBook: Book = {
+      id: Date.now().toString(),
+      ...data,
+      dateAdded: new Date().toISOString(),
+    };
+    const response = await fetch('/api/books', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newBook),
+    });
+    return response.ok;
+  };
+
+  const handleQuickScan = async (isbn: string) => {
+    setShowQuickScanner(false);
+    setToast({ msg: 'Looking up ISBN...', type: 'success' });
+    try {
+      const res = await fetch(`/api/isbn?isbn=${isbn}`);
+      if (res.ok) {
+        const data = await res.json();
+        const ok = await addBookDirect({ title: data.title, author: data.author, isbn });
+        if (ok) {
+          await fetchBooks();
+          setToast({ msg: `Added: ${data.title}`, type: 'success' });
+          return;
+        }
+      }
+    } catch {}
+    // ISBN not found or add failed — open modal pre-filled
+    setQuickScanState({ isbn, notFound: true });
+    setShowModal(true);
+    setToast(null);
+  };
+
   const handleAddBook = async (data: BookFormData) => {
     try {
       const newBook: Book = {
@@ -121,6 +161,7 @@ export default function Home() {
       });
       if (!response.ok) throw new Error('Failed to add book');
       setShowModal(false);
+      setQuickScanState(null);
       await fetchBooks();
       setToast({ msg: 'Book added!', type: 'success' });
     } catch (err) {
@@ -415,14 +456,31 @@ export default function Home() {
         <BookList books={filteredBooks} onDelete={handleDeleteBook} />
       </div>
 
-      {/* FAB */}
-      <button
-        onClick={() => setShowModal(true)}
-        className="fixed bottom-6 right-6 z-20 bg-blue-600 text-white w-14 h-14 rounded-full shadow-lg flex items-center justify-center active:scale-90 hover:bg-blue-700 transition"
-        aria-label="Add book"
-      >
-        <PlusIcon className="w-6 h-6" />
-      </button>
+      {/* FABs */}
+      <div className="fixed bottom-6 right-6 z-20 flex flex-col items-center gap-3">
+        <button
+          onClick={() => setShowQuickScanner(true)}
+          className="bg-purple-600 text-white w-12 h-12 rounded-full shadow-lg flex items-center justify-center active:scale-90 hover:bg-purple-700 transition"
+          aria-label="Quick scan"
+        >
+          <CameraIcon className="w-5 h-5" />
+        </button>
+        <button
+          onClick={() => { setQuickScanState(null); setShowModal(true); }}
+          className="bg-blue-600 text-white w-14 h-14 rounded-full shadow-lg flex items-center justify-center active:scale-90 hover:bg-blue-700 transition"
+          aria-label="Add book"
+        >
+          <PlusIcon className="w-6 h-6" />
+        </button>
+      </div>
+
+      {/* Quick Scanner */}
+      {showQuickScanner && (
+        <BarcodeScanner
+          onScan={handleQuickScan}
+          onClose={() => setShowQuickScanner(false)}
+        />
+      )}
 
       {/* Add Book Modal (bottom sheet on mobile) */}
       {showModal && (
@@ -436,7 +494,12 @@ export default function Home() {
               </button>
             </div>
             <div className="px-5 py-4">
-              <BookForm onSubmit={handleAddBook} authors={uniqueAuthors} />
+              <BookForm
+                onSubmit={handleAddBook}
+                authors={uniqueAuthors}
+                defaultIsbn={quickScanState?.isbn}
+                isbnNotFound={quickScanState?.notFound}
+              />
             </div>
           </div>
         </div>
